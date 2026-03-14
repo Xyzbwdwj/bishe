@@ -1,18 +1,118 @@
-python Main_s4.py --input data/Ns200_SeqN100_1.pth.tar --batch-size 1 --net ElmanRNN_tp1 --pred 1 --fixi 1 --savename Elman_SGD/Remap_predloss/Ns200_SeqN100_predloss_full
+#!/usr/bin/env bash
+set -euo pipefail
 
-python Main_s4.py --input data/Ns200_SeqN100_2Batch.pth.tar --batch-size 2 --net ElmanRNN_tp1 --pred 1 --fixi 1 --savename Elman_SGD/Remap_predloss/Ns200_SeqN100_2Batch_predloss
+cd "$(dirname "$0")"
 
-python Main_clean.py --input data/Ns200_SeqN100_1.pth.tar --ae 1 --fixi 2 --fixo 2 --pred 1 --rnn_act relu --ac_output sigmoid --epoch 100000 --savename Elman_SGD/Remap_predloss/N200T100_relu_fixio/pred_relu
+# Usage:
+#   bash Figure4_run.sh
+#   PY=/path/to/python bash Figure4_run.sh
+#   FULL_RUN=1 bash Figure4_run.sh
+#
+# Defaults are a quick "smoke" run so Figure4.py can complete on CPU.
+# Set FULL_RUN=1 for long/full training settings.
 
-python Main_clean.py --input data/Ns200_SeqN100_2.pth.tar --epoch 2000 -p 100 --resume Elman_SGD/Remap_predloss/N200T100_relu_fixio/pred_relu.pth.tar --ae 1 --fixi 2 --fixo 2 --pred 1 --hidden-n 500 --rnn_act relu --ac_output sigmoid --savename Elman_SGD/Remap_predloss/N200T100_relu_fixio/stages/remap_s0
+PY="${PY:-python}"
+GPU="${GPU:-0}"
+MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"
+export MPLCONFIGDIR
 
-python Main_clean.py --input data/Ns200_SeqN100_2.pth.tar --epoch 50000 -p 5000 --ae 1 --fixi 2 --fixo 2 --pred 1 --hidden-n 500 --rnn_act relu --ac_output sigmoid --resume Elman_SGD/Remap_predloss/N200T100_relu_fixio/stages/remap_s0.pth.tar --savename Elman_SGD/Remap_predloss/N200T100_relu_fixio/stages/remap_s1
+if [[ "${FULL_RUN:-0}" == "1" ]]; then
+  MAIN_S4_EPOCHS=50000
+  PRED_EPOCHS=100000
+  REMAP_N_EPOCHS=2000
+  REMAP_F_EPOCHS=20000
+  PRINT_FREQ=1000
+else
+  MAIN_S4_EPOCHS=2
+  PRED_EPOCHS=2
+  REMAP_N_EPOCHS=2
+  REMAP_F_EPOCHS=2
+  PRINT_FREQ=1
+fi
 
-python Main_clean.py --input data/Ns200_SeqN100_1_5per.pth.tar --epoch 2000 -p 100 --resume Elman_SGD/Remap_predloss/N200T100_relu_fixio/pred_relu_big.pth.tar --ae 1 --fixi 2 --fixo 2 --pred 1 --hidden-n 500 --rnn_act relu --clamp_norm 0.5 --ac_output sigmoid --savename Elman_SGD/Remap_predloss/N200T100_relu_fixio/F5per_stages/remap_s0
+OUT="Elman_SGD/Remap_predloss"
+BASE="$OUT/N200T100_relu_fixio"
+mkdir -p \
+  "$BASE/stages" \
+  "$BASE/F5per_stages" \
+  "$BASE/F10per_stages" \
+  "$BASE/F20per_stages" \
+  "$BASE/F30per_stages" \
+  "$BASE/F40per_stages" \
+  "$BASE/F50per_stages"
 
-python Main_clean.py --input Elman_SGD/Remap_predloss/Ns200_SeqN100_1_5per.pth.tar --epoch 10000 -p 5000 --ae 1 --fixi 2 --fixo 2 --pred 1 --hidden-n 500 --rnn_act relu --clamp_norm 0.5 --ac_output sigmoid --resume Elman_SGD/Remap_predloss/N200T100_relu_fixio/F5per_stages/remap_s0.pth.tar --savename Elman_SGD/Remap_predloss/N200T100_relu_fixio/F5per_stages/remap_s1
+echo "[1/4] Train Panel B/C models on CPU"
+"$PY" Main_s4.py \
+  --gpu "$GPU" \
+  --epochs "$MAIN_S4_EPOCHS" \
+  -p "$PRINT_FREQ" \
+  --input data/Ns200_SeqN100_1.pth.tar \
+  --batch-size 1 \
+  --net ElmanRNN_tp1 \
+  --pred 1 \
+  --fixi 1 \
+  --savename "$OUT/Ns200_SeqN100_predloss_full"
 
-for noise in 10 20 30 40 50  
-do  
-python Main_clean.py --input Elman_SGD/Remap_predloss/Ns200_SeqN100_1_$((noise))per.pth.tar --epoch 20000 -p 1000 --resume Elman_SGD/Remap_predloss/N200T100_relu_fixio/pred_relu_big.pth.tar --ae 1 --fixi 2 --fixo 2 --pred 1 --hidden-n 500 --clamp_norm 0.5 --rnn_act relu --ac_output sigmoid --savename Elman_SGD/Remap_predloss/N200T100_relu_fixio/F$((noise))per_stages/remap_s0  
+"$PY" Main_s4.py \
+  --gpu "$GPU" \
+  --epochs "$MAIN_S4_EPOCHS" \
+  -p "$PRINT_FREQ" \
+  --input data/Ns200_SeqN100_2Batch.pth.tar \
+  --batch-size 2 \
+  --net ElmanRNN_tp1 \
+  --pred 1 \
+  --fixi 1 \
+  --savename "$OUT/Ns200_SeqN100_2Batch_predloss"
+
+echo "[2/4] Train base remap model"
+"$PY" Main_clean.py \
+  --gpu "$GPU" \
+  --epochs "$PRED_EPOCHS" \
+  -p "$PRINT_FREQ" \
+  --input data/Ns200_SeqN100_1.pth.tar \
+  --ae 1 \
+  --fixi 2 \
+  --fixo 2 \
+  --pred 1 \
+  --hidden-n 200 \
+  --rnn_act relu \
+  --ac_output sigmoid \
+  --savename "$BASE/pred_relu"
+
+echo "[3/4] Train F->N remap stage"
+"$PY" Main_clean.py \
+  --gpu "$GPU" \
+  --epochs "$REMAP_N_EPOCHS" \
+  -p "$PRINT_FREQ" \
+  --input data/Ns200_SeqN100_2.pth.tar \
+  --resume "$BASE/pred_relu.pth.tar" \
+  --ae 1 \
+  --fixi 2 \
+  --fixo 2 \
+  --pred 1 \
+  --hidden-n 200 \
+  --rnn_act relu \
+  --ac_output sigmoid \
+  --savename "$BASE/stages/remap_s0"
+
+echo "[4/4] Train F->F remap stages (5/10/20/30/40/50)"
+for noise in 5 10 20 30 40 50; do
+  "$PY" Main_clean.py \
+    --gpu "$GPU" \
+    --epochs "$REMAP_F_EPOCHS" \
+    -p "$PRINT_FREQ" \
+    --input "data/Ns200_SeqN100_1_${noise}per.pth.tar" \
+    --resume "$BASE/pred_relu.pth.tar" \
+    --ae 1 \
+    --fixi 2 \
+    --fixo 2 \
+    --pred 1 \
+    --hidden-n 200 \
+    --rnn_act relu \
+    --clamp_norm 0.5 \
+    --ac_output sigmoid \
+    --savename "$BASE/F${noise}per_stages/remap_s0"
 done
+
+echo "Done. Next step:"
+echo "  $PY Figure4.py"

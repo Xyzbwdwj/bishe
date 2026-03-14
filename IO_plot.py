@@ -15,6 +15,7 @@ from RNN_Class import ElmanRNN_pytorch_module_v2
 import time
 import glob
 import os.path
+import shutil
 
 parser = argparse.ArgumentParser(description='Plot IO figure in a folder')
 parser.add_argument('--dic', default='', type=str)
@@ -202,7 +203,7 @@ def ITO_plot_formal(X_p,Target_p,output_p,N,SeqN,Path,savename,title_list,vmax_l
 	plt.title(title_list[2]); 
 	plt.xlabel('Time (a.u.)'); plt.ylabel('Neuron index') 
 	plt.tight_layout()
-	plt.rc('text',usetex=True)
+	plt.rc('text',usetex=shutil.which("latex") is not None)
 	plt.rc('font', size=12)          # controls default text sizes
 	plt.rc('axes', titlesize=16)     # fontsize of the axes title
 	plt.rc('axes', labelsize=16)    # fontsize of the x and y labels
@@ -214,7 +215,6 @@ def ITO_plot_formal(X_p,Target_p,output_p,N,SeqN,Path,savename,title_list,vmax_l
 
 if __name__ == '__main__':
     main(dic)
-
 
 
 

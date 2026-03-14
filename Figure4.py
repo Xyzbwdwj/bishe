@@ -8,9 +8,13 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import glob
 import scipy.signal as signal
-font = {'family': 'sans-serif', 'sans-serif': ['Helvetica'], 'size': 14}
+import shutil
+font = {'family': 'sans-serif', 'sans-serif': ['Helvetica', 'DejaVu Sans'], 'size': 14}
 matplotlib.rc('font', **font)
-plt.rcParams.update({"text.usetex": True})
+plt.rcParams.update({"text.usetex": shutil.which("latex") is not None})
+
+def load_torch_cpu(path):
+	return torch.load(path, map_location='cpu')
 
 
 # Panel A: Inputs: 
@@ -67,29 +71,32 @@ data_name = 'Ns{}_SeqN{}_1'.format(N,SeqN)
 model_name = 'Ns{}_SeqN{}_predloss_full'.format(N,SeqN)
 model = ElmanRNN_tp1(N,HN,N)
 model.act = nn.Sigmoid()
-net = torch.load(Path+model_name+'.pth.tar',map_location='cuda:0')
-data = torch.load(Path+data_name+'.pth.tar')
+net = load_torch_cpu(Path+model_name+'.pth.tar')
+data = load_torch_cpu(Path+data_name+'.pth.tar')
 model.load_state_dict(net['state_dict'])
 X_mini = data['X_mini'][:,:-1,:]; Target_mini = data['Target_mini'][:,1:,:] 
+SeqN = X_mini.shape[1]
 
 ## Replay
 SeqN = 100; N = 200; HN = 200
 X_noise = np.random.normal(0,1,X_mini.shape)*X_mini.numpy().max()*0.01
 X_noise = torch.tensor(X_noise.astype(np.single))
 output_null,_ = model(X_noise,torch.zeros((1,1,HN)))
+X_plot = X_noise[0,:,:].numpy().T
 Target_p = Target_mini[0,:,:].T
 output_p = output_null.detach().numpy()[0,:,:].T
 title_list = ['Input current ($x_t$)','Target output ($y_t$)','Output after training ($\hat{y_t}$)']
-vmax_list = np.array([X_noise.max(),Target_p.max(), output_p.max()])
-ITO_plot_formal(X_noise,Target_p,output_p,N,SeqN,Path,model_name+'_ITO',title_list, vmax_list)
+vmax_list = np.array([float(X_plot.max()), float(Target_p.max()), float(output_p.max())])
+ITO_plot_formal(X_plot,Target_p,output_p,N,SeqN,Path,model_name+'_ITO',title_list, vmax_list)
 
 ## Prediction
 X_noise[:,:10,:] = X_mini[:,:10,:]
 output_null,_ = model(X_noise,torch.zeros((1,1,HN)))
+X_plot = X_noise[0,:,:].numpy().T
 output_p = output_null.detach().numpy()[0,:,:].T
 title_list = ['Input current ($x_t$)','Target output ($y_t$)','Output after training ($\hat{y_t}$)']
-vmax_list = np.array([X_noise.max(),Target_p.max(), output_p.max()])
-ITO_plot_formal(X_noise,Target_p,output_p,N,SeqN,Path,model_name+'_ITO',title_list, vmax_list)
+vmax_list = np.array([float(X_plot.max()), float(Target_p.max()), float(output_p.max())])
+ITO_plot_formal(X_plot,Target_p,output_p,N,SeqN,Path,model_name+'_ITO',title_list, vmax_list)
 
 
 # Panel C: Weight trace
@@ -97,8 +104,8 @@ model_name = 'Ns{}_SeqN{}_2Batch_predloss'.format(N,SeqN)
 data_name = 'Ns{}_SeqN{}_2Batch'.format(N,SeqN)
 model = ElmanRNN_tp1(N,HN,N)
 model.act = nn.Sigmoid()
-net = torch.load(Path+model_name+'.pth.tar')
-data = torch.load(Path+data_name+'.pth.tar')
+net = load_torch_cpu(Path+model_name+'.pth.tar')
+data = load_torch_cpu(Path+data_name+'.pth.tar')
 X_mini = data['X_mini'][:,:-1,:]
 model.load_state_dict(net['state_dict'])
 W = net['state_dict']['hidden_linear.weight'].cpu().numpy()
@@ -137,7 +144,7 @@ for i in range(2):
 	plt.rc('axes', titlesize=16, labelsize=16) 
 
 plt.tight_layout()
-plt.savefig(Path+model_name+'_W_sorted.eps')
+plt.savefig(Path+model_name+'_W_sorted.pdf')
 plt.close()
 
 offset_list = np.arange(-N,N+1)
@@ -160,62 +167,51 @@ plt.close()
 # Panel D: CA1 v.s. CA3 Place fields 
 ## load trained models and save intermediate variables
 
-### concatenate training stages
-novel = 1 # for F -> N remapping
-# novel = 0 # for F -> F remapping
+### concatenate training stages and build evol files needed by later panels
 Path = 'Elman_SGD/Remap_predloss/'
 N, SeqN = 200, 100
 HN = 200
-if novel:
-	noise_level_list = [0.0001]
-else:
-	noise_level_list = [0.05,0.1,0.2,0.3,0.4,0.5]
+remap_cases = [
+	('N200T100_relu_fixio/stages/', 'data/Ns200_SeqN100_2.pth.tar'),
+	('N200T100_relu_fixio/F5per_stages/', 'data/Ns200_SeqN100_1_5per.pth.tar'),
+	('N200T100_relu_fixio/F10per_stages/', 'data/Ns200_SeqN100_1_10per.pth.tar'),
+	('N200T100_relu_fixio/F20per_stages/', 'data/Ns200_SeqN100_1_20per.pth.tar'),
+	('N200T100_relu_fixio/F30per_stages/', 'data/Ns200_SeqN100_1_30per.pth.tar'),
+	('N200T100_relu_fixio/F40per_stages/', 'data/Ns200_SeqN100_1_40per.pth.tar'),
+	('N200T100_relu_fixio/F50per_stages/', 'data/Ns200_SeqN100_1_50per.pth.tar'),
+]
 
-for noise_level in noise_level_list:
-	env1_name = 'Ns{}_SeqN{}_1'.format(N,SeqN)
-	if novel:
-		env2_name = 'Ns{}_SeqN{}_2'.format(N,SeqN)
-		subpath = 'N{}T{}_relu_fixio/stages/'.format(N,SeqN)
-	else:
-		env2_name = 'Ns{}_SeqN{}_1_{}per'.format(N,SeqN,int(noise_level*100))
-		subpath = 'N{}T{}_relu_fixio/F{}per_stages/'.format(N,SeqN,int(noise_level*100))
+for subpath, env2_path in remap_cases:
 	print(subpath)
 	model0_name = 'N{}T{}_relu_fixio/pred_relu'.format(N,SeqN)
 	net = ElmanRNN_pytorch_module_v2(N,HN,N)
 	net.act = nn.Sigmoid()
 	net.rnn = nn.RNN(N,HN,1, batch_first=True, nonlinearity = 'relu')
-	# Before exposure to env2 
-	env1 = torch.load(Path+env1_name+'.pth.tar')
+	env1 = load_torch_cpu('data/Ns{}_SeqN{}_1.pth.tar'.format(N,SeqN))
 	X_mini = env1['X_mini'][:,:-1,:]
-	env2 = torch.load(Path+env2_name+'.pth.tar')
+	env2 = load_torch_cpu(env2_path)
 	X_new = env2['X_mini'][:,:-1,:]
-	model0 = torch.load(Path+model0_name+'.pth.tar',map_location='cuda:0')
+	model0 = load_torch_cpu(Path+model0_name+'.pth.tar')
 	net.load_state_dict(model0['state_dict'])
 	output_old,h_seq_old = net(X_mini,torch.zeros((1,1,HN)))
-	output0,h_seq0 = net(X_new,torch.zeros((1,1,HN)))
 	y_hat = np.zeros((1,SeqN-1,N))
 	hidden = np.zeros((1,SeqN-1,HN))
 	y_hat[0,:,:] = output_old.detach().numpy()[0,:,:]
 	hidden[0,:,:] = h_seq_old.detach().numpy()[0,:,:]
-	epoch,epoch_list = 0,[0]
+	epoch_list = [0]
 	previous_ep = 0
-	remaps = glob.glob(Path+subpath+'remap_s*.pth.tar')
-	for i,remap_name in enumerate(remaps):
-		remap = torch.load(remap_name)
+	remaps = sorted(glob.glob(Path+subpath+'remap_s*.pth.tar'))
+	for remap_name in remaps:
+		remap = load_torch_cpu(remap_name)
 		y_hat = np.concatenate((y_hat,remap['y_hat'][:,0,:,:]),axis=0)
 		hidden = np.concatenate((hidden,remap['hidden'][:,0,:,:]),axis=0)
-		epoch_list += [i+previous_ep for i in range(0,len(remap['loss']),int(len(remap['loss'])/remap['hidden'].shape[0]))]
+		step = max(1, int(len(remap['loss'])/remap['hidden'].shape[0]))
+		epoch_list += [i+previous_ep for i in range(0,len(remap['loss']),step)]
 		previous_ep += len(remap['loss'])
 	torch.save({'X_mini':X_mini,'X_new':X_new,'y_hat':y_hat,'hidden':hidden,'epoch_list':epoch_list},
-	Path+subpath+'HO_evol.pth.tar')
+		Path+subpath+'HO_evol.pth.tar')
 
-### generate CA1 and CA3 responses
-for noise_level in noise_level_list:
-	if novel:
-		subpath = 'N200T100_relu_fixio/stages/'
-	else:
-		subpath = 'N200T100_relu_fixio/F{}per_stages/'.format(int(noise_level*100))
-	loaded = torch.load(Path+subpath+'HO_evol.pth.tar')
+	loaded = load_torch_cpu(Path+subpath+'HO_evol.pth.tar')
 	X_mini = loaded['X_mini']; X_new = loaded['X_new']
 	y_hat = loaded['y_hat']; hidden = loaded['hidden']; epoch_list = loaded['epoch_list']
 	err_list = []
@@ -235,14 +231,14 @@ for noise_level in noise_level_list:
 	CA1_rep = np.concatenate((y_hat,err_matrix),axis=2)
 	CA3_rep = hidden
 	torch.save({'CA1_rep':CA1_rep,'CA3_rep':CA3_rep},
-	Path+subpath+'Field2_evol.pth.tar')
+		Path+subpath+'Field2_evol.pth.tar')
 
 
 ## Panel D: Plot fields in F and N after stablized 
 subpath1 = 'N200T100_relu_fixio/F5per_stages/' # F -> F remapping
 subpath2 = 'N200T100_relu_fixio/stages/' # F -> N remapping
-env1 = torch.load(Path+subpath1+'Field2_evol.pth.tar')
-env2 = torch.load(Path+subpath2+'Field2_evol.pth.tar')
+env1 = load_torch_cpu(Path+subpath1+'Field2_evol.pth.tar')
+env2 = load_torch_cpu(Path+subpath2+'Field2_evol.pth.tar')
 CA1_rep = [env1['CA1_rep'][-1,:,:],env2['CA1_rep'][-1,:,:]]
 CA3_rep = [env1['CA3_rep'][-1,:,:],env2['CA3_rep'][-1,:,:]]
 
@@ -292,56 +288,60 @@ plt.imshow(X_p,vmax=X_p.max()*0.7)
 plt.title('CA3\n N: N sorted')
 plt.tight_layout()
 plt.savefig(Path+'FF_FN_Field2.png')
-plt.savefig(Path+'FF_FN_Field2.eps')
+plt.savefig(Path+'FF_FN_Field2.pdf')
 plt.close()
 
 
 ## Panel E: Lap onset stats
-subpath = 'N200T100_relu_fixio/stages/' # F -> N remapping
-# subpath = 'N200T100_relu_fixio/F5per_stages/' # F -> F remapping
-loaded = torch.load(Path+subpath+'Field2_evol.pth.tar')
-CA3_rep = loaded['CA3_rep']
-CA1_rep = loaded['CA1_rep']
-ac_prob = 0.5 # Optimal, add activation probability for lap onset probability
-dice1 = np.random.binomial(1,ac_prob,size=CA1_rep.shape)
-dice2 = np.random.binomial(1,ac_prob,size=CA3_rep.shape)
-for i in range(dice.shape[1]):
-	dice1[:,i,:] = dice1[:,0,:]
-	dice2[:,i,:] = dice2[:,0,:]
+def save_field_onset(subpath):
+	loaded = load_torch_cpu(Path+subpath+'Field2_evol.pth.tar')
+	CA3_rep = loaded['CA3_rep']
+	CA1_rep = loaded['CA1_rep']
+	HN = CA3_rep.shape[2]
+	n_laps = CA3_rep.shape[0] - 1
+	ac_prob = 0.5 # Optimal, add activation probability for lap onset probability
+	dice1 = np.random.binomial(1,ac_prob,size=CA1_rep.shape)
+	dice2 = np.random.binomial(1,ac_prob,size=CA3_rep.shape)
+	for i in range(dice1.shape[1]):
+		dice1[:,i,:] = dice1[:,0,:]
+		dice2[:,i,:] = dice2[:,0,:]
 
-CA1_rep = np.multiply(CA1_rep,dice1)
-CA3_rep = np.multiply(CA3_rep,dice2)
+	CA1_rep = np.multiply(CA1_rep,dice1)
+	CA3_rep = np.multiply(CA3_rep,dice2)
 
-MI_CA1 = np.zeros((len(epoch_list)-1,CA1_rep.shape[2]))
-MI_CA3 = np.zeros((len(epoch_list)-1,HN))
-for i in range(len(epoch_list)-1):
-	MI_CA1[i,:] = np.array([MI_linear(CA1_rep[i+1,:,neuron_idx],norm=False) for neuron_idx in range(CA1_rep.shape[2])])
-	MI_CA3[i,:] = np.array([MI_linear(CA3_rep[i+1,:,neuron_idx],norm=False) for neuron_idx in range(HN)])
+	MI_CA1 = np.zeros((n_laps,CA1_rep.shape[2]))
+	MI_CA3 = np.zeros((n_laps,HN))
+	for i in range(n_laps):
+		MI_CA1[i,:] = np.array([MI_linear(CA1_rep[i+1,:,neuron_idx],norm=False) for neuron_idx in range(CA1_rep.shape[2])])
+		MI_CA3[i,:] = np.array([MI_linear(CA3_rep[i+1,:,neuron_idx],norm=False) for neuron_idx in range(HN)])
 
-thres_CA1 = np.percentile(MI_CA1,80)
-thres_CA3 = np.percentile(MI_CA3,80)
-onset_idx_CA1 = []
-for neuron_idx in range(MI_CA1.shape[1]):
-	MI_laps = MI_CA1[:,neuron_idx]
-	if not (MI_laps>thres_CA1).sum():
-		onset_idx_CA1.append(np.nan)
-		continue
-	onset_idx_CA1.append(np.argwhere(MI_laps>thres_CA1)[0][0])
+	thres_CA1 = np.percentile(MI_CA1,80)
+	thres_CA3 = np.percentile(MI_CA3,80)
+	onset_idx_CA1 = []
+	for neuron_idx in range(MI_CA1.shape[1]):
+		MI_laps = MI_CA1[:,neuron_idx]
+		if not (MI_laps>thres_CA1).sum():
+			onset_idx_CA1.append(np.nan)
+			continue
+		onset_idx_CA1.append(np.argwhere(MI_laps>thres_CA1)[0][0])
 
-onset_idx_CA3 = []
-for neuron_idx in range(MI_CA3.shape[1]):
-	MI_laps = MI_CA3[:,neuron_idx]
-	if not (MI_laps>thres_CA3).sum():
-		onset_idx_CA3.append(np.nan)
-		continue
-	onset_idx_CA3.append(np.argwhere(MI_laps>thres_CA3)[0][0])
+	onset_idx_CA3 = []
+	for neuron_idx in range(MI_CA3.shape[1]):
+		MI_laps = MI_CA3[:,neuron_idx]
+		if not (MI_laps>thres_CA3).sum():
+			onset_idx_CA3.append(np.nan)
+			continue
+		onset_idx_CA3.append(np.argwhere(MI_laps>thres_CA3)[0][0])
 
-torch.save({'onset_idx_CA1':onset_idx_CA1,
-			'onset_idx_CA3':onset_idx_CA3}, 
-			Path+subpath+'Field2_onset.pth.tar')
+	torch.save({'onset_idx_CA1':onset_idx_CA1,
+				'onset_idx_CA3':onset_idx_CA3},
+				Path+subpath+'Field2_onset.pth.tar')
 
-FN = torch.load(Path+'N200T100_relu_fixio/stages/Field2_onset.pth.tar')
-FF = torch.load(Path+'N200T100_relu_fixio/F5per_stages/Field2_onset.pth.tar')
+save_field_onset('N200T100_relu_fixio/stages/')
+save_field_onset('N200T100_relu_fixio/F5per_stages/')
+
+FN = load_torch_cpu(Path+'N200T100_relu_fixio/stages/Field2_onset.pth.tar')
+FF = load_torch_cpu(Path+'N200T100_relu_fixio/F5per_stages/Field2_onset.pth.tar')
 
 fig, ax = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True, figsize=(4,6))
 plt.subplot(2,2,1)
@@ -375,10 +375,10 @@ noise_level2_list = [0.1,0.2,0.3,0.4,0.5]
 for noise_level2 in noise_level2_list:
 	subpath1 = 'N200T100_relu_fixio/F{}per_stages/'.format(int(noise_level1*100))
 	subpath2 = 'N200T100_relu_fixio/F{}per_stages/'.format(int(noise_level2*100))
-	env1 = torch.load(Path+subpath1+'Field2_evol.pth.tar')
-	env2 = torch.load(Path+subpath2+'Field2_evol.pth.tar')
-	corr_CA3 = np.array([np.corrcoef(env1['CA3_rep'][-1,:,neuron_idx], env2['CA3_rep'][-1,:,neuron_idx])[0,1] for neuron_idx in range(CA3_rep.shape[2])])
-	corr_CA1 = np.array([np.corrcoef(env1['CA1_rep'][-1,:,neuron_idx], env2['CA1_rep'][-1,:,neuron_idx])[0,1] for neuron_idx in range(CA1_rep.shape[2])])
+	env1 = load_torch_cpu(Path+subpath1+'Field2_evol.pth.tar')
+	env2 = load_torch_cpu(Path+subpath2+'Field2_evol.pth.tar')
+	corr_CA3 = np.array([np.corrcoef(env1['CA3_rep'][-1,:,neuron_idx], env2['CA3_rep'][-1,:,neuron_idx])[0,1] for neuron_idx in range(env1['CA3_rep'].shape[2])])
+	corr_CA1 = np.array([np.corrcoef(env1['CA1_rep'][-1,:,neuron_idx], env2['CA1_rep'][-1,:,neuron_idx])[0,1] for neuron_idx in range(env1['CA1_rep'].shape[2])])
 	torch.save({'corr_CA1':corr_CA1,'corr_CA3':corr_CA3},
 		Path+'env{}_env{}_Field2_corr.pth.tar'.format(int(noise_level1*100),int(noise_level2*100)))
 
@@ -386,7 +386,7 @@ CA1_list = []
 CA3_list = []
 noise_level2_list = [0.1,0.2,0.3,0.4]
 for noise_level2 in noise_level2_list:
-	tmp = torch.load(Path+'env5_env{}_Field2_corr.pth.tar'.format(int(100*noise_level2)))
+	tmp = load_torch_cpu(Path+'env5_env{}_Field2_corr.pth.tar'.format(int(100*noise_level2)))
 	CA1_list.append(tmp['corr_CA1'])
 	CA3_list.append(tmp['corr_CA3'])
 
@@ -407,10 +407,5 @@ plt.legend()
 plt.ylabel('Correlation (mean $\pm$ sem)'); plt.xlabel('Fog level')
 plt.tight_layout()
 plt.savefig(Path+'Field2_corr.png')
-plt.savefig(Path+'Field2_corr.eps',transparent=True)
+plt.savefig(Path+'Field2_corr.pdf',transparent=True)
 plt.close()
-
-
-
-
-

@@ -1,0 +1,33 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments / package caches
+.anaconda/
+.conda/
+.cache/
+.miniconda3/
+.venv/
+venv/
+env/
+
+# Local helper scripts
+activate_fig567.sh
+
+# Experiment outputs / checkpoints
+_smoke/
+Elman_SGD/
+NeuralEvidence/allen_data/
+
+# Optional logs / generated figures in root
+*.log
+

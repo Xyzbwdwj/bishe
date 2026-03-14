@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from RNN_class import *
+from RNN_Class import *
 from helper import *
 import pickle
 
@@ -25,7 +25,7 @@ parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,metavar=
 parser.add_argument('-n', '--n', default=200, type=int, help='Input/output size')
 parser.add_argument('--hidden_n', default=200, type=int, help='Hidden dimension size')
 parser.add_argument('--savename', default='', type = str, help='output saving name')
-parser.add_argument('-t','--total_steps', default=100, type=int, help='Total steps per traversal')
+parser.add_argument('-t', '--total_steps', '--t', dest='total_steps', default=100, type=int, help='Total steps per traversal')
 parser.add_argument('-p', '--print_freq', default=1000, type=int,metavar='N', help='print frequency (default: 1000)')
 parser.add_argument('--learning_alg', default='bptt', type=str, help='learning algorithm (default: bptt)')
 parser.add_argument('--inputfile', default='', type=str, help='name of input file (default: gaussian pc)')
@@ -133,3 +133,5 @@ def train_partial(Y_mini, h0, n_epochs, lr, learning_alg, print_freq=1000):
     return net, loss_list, [dLdW_list, dLdV_list, dLdU_list, dLdb_list, dLdc_list], hidden_rep, output_rep
 
 
+if __name__ == "__main__":
+    main()

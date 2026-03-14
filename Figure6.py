@@ -1,127 +1,151 @@
-import time
+import argparse
 import os
-import numpy as np
-from numpy import loadtxt
+
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from mpl_toolkits import mplot3d
-from scipy import ndimage 
-from scipy.special import softmax
-from scipy.stats import norm
-import pickle as pk
-# from mnist import MNIST
-from sklearn.decomposition import PCA
-from sklearn.decomposition import FastICA
-from sklearn.cluster import KMeans
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from RNN_Class import *
-from IO_plot import *
-SMALL_SIZE = 10
-MEDIUM_SIZE = 10
-BIGGER_SIZE = 14
+from sklearn.decomposition import FastICA
 
-Path = 'Elman_SGD/predloss/'; 
-
-# trained MNIST models
-Ns = 5
-SeqN = 100
-N = 68; hidden_N = 200
-name = 'MNIST_68PC_SeqN{}_Ns{}_partial'.format(SeqN,Ns)
-net = torch.load(Path+name+'.pth.tar');
-
-X_mini = net['X_mini'].cpu(); Target_mini = net['Target_mini'].cpu(); 
-model = ElmanRNN_pred(N,hidden_N,N)
-model.act = nn.Tanh()
-model.load_state_dict(net['state_dict']); 
-
-h_t = torch.zeros(1,Ns,hidden_N)
-output,_ = model(X_mini,h_t)
-
-# Keep on predicting using feedback signal
-Stop_t = 17;
-X_null = torch.zeros((Ns,SeqN,N))
-X_null[:,:Stop_t,:] = X_mini[:,:Stop_t,:]
-output,_ = model(X_null,h_t)
-o_future = torch.zeros(output.shape)
-output_t, htp1 = model(X_mini[:,:Stop_t,:], torch.zeros(1,Ns,hidden_N))
-o_future[:,:Stop_t,:] = output_t.detach()
-for t in np.arange(SeqN-Stop_t):
-	xtp1 = o_future[:,Stop_t+t-1:Stop_t+t+1,:]
-	otp1,htp1 = model(xtp1,htp1)
-	o_future[:,Stop_t+t:Stop_t+t+1,:] = otp1[:,1:,:].detach()
-
-o = np.zeros((Ns*SeqN,N))
-count = 0;
-for i in np.arange(Ns):
-	for j in np.arange(SeqN):
-		o[count,:] = output.detach()[i,j,:]		
-		# o[count,:] = o_future.detach()[i,j,:]
-		count = count + 1
-
-o_re = pca.inverse_transform(o*scale+center)
-o_re_reshape = np.zeros((Ns,SeqN,784))
-for i in np.arange(Ns):
-	o_re_reshape[i,:,:] = o_re[i*SeqN:(i+1)*SeqN,:]
+from RNN_Class import ElmanRNN_pred
 
 
-# Panel B/C: Reconstruction and Prediction
-plt.figure(figsize=(20,Ns))
-count = 1
-for i in np.arange(Ns):
-	for j in np.arange(20):
-		plt.subplot(Ns,20,count)
-		plt.imshow(o_re[i*SeqN+j,:].reshape((28,28)))
-		frame1 = plt.gca()
-		frame1.axes.get_xaxis().set_visible(False)
-		frame1.axes.get_yaxis().set_visible(False)
-		count = count + 1
-
-plt.tight_layout()
-plt.savefig(Path+name+'_O_re.pdf')
-plt.close()
-
-
-# recurrent unit activity
-ht_seq = torch.zeros((Ns,SeqN,hidden_N))
-htp1_seq = torch.zeros((Ns,SeqN,hidden_N))
-ht = torch.zeros((1,Ns,hidden_N)) 
-# for predloss
-for t in np.arange(SeqN):
-	ht = model.tanh(model.input_linear(X_mini[:,t,:]) + model.hidden_linear(ht))
-	htp1 = model.tanh(model.hidden_linear(ht))
-	ht_seq[:,t,:] = ht.detach()
-	htp1_seq[:,t,:] = htp1.detach()
-
-htp1_full = np.zeros((Ns*SeqN,hidden_N))
-for i in np.arange(Ns):
-	htp1_full[i*SeqN:(i+1)*SeqN,:] = htp1_seq[i,:,:]
+def parse_args():
+    parser = argparse.ArgumentParser(description="Reproduce Fig.6 from trained model")
+    parser.add_argument(
+        "--model",
+        default="Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5_partial.pth.tar",
+        type=str,
+        help="Trained predictive checkpoint from Main.py",
+    )
+    parser.add_argument(
+        "--input-meta",
+        default="Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar",
+        type=str,
+        help="Output of Figure6_InputPrep.py containing PCA metadata",
+    )
+    parser.add_argument("--hidden-n", default=200, type=int, help="Hidden size")
+    parser.add_argument("--stop-t", default=17, type=int, help="Teacher-forcing stop time")
+    parser.add_argument("--device", default="cpu", type=str, help="cpu or cuda:0")
+    parser.add_argument(
+        "--out-prefix",
+        default="",
+        type=str,
+        help="Output prefix (default: model path without .pth.tar)",
+    )
+    return parser.parse_args()
 
 
-# Panel D: ICA
-ICA = FastICA(n_components=10,max_iter=1000)
-X_ic = ICA.fit_transform(htp1_full) # results differ in permutation
-
-IC1_list = np.array([0,1,2,3]); IC2_list = np.array([0,1,2,3])
-plt.figure(figsize=(7,7))
-for idx in np.arange(len(IC1_list)):
-	IC1 = IC1_list[idx]; IC2 = IC2_list[idx]
-	plt.subplot(2,2,idx+1)
-	for digit in np.arange(10):
-		idx_digit = np.arange(LoopN)*10+digit
-		plt.plot(X_ic[idx_digit,IC1],X_ic[idx_digit,IC2],'.')
-	plt.xlabel('IC{}'.format(IC1));
-	plt.ylabel('IC{}'.format(IC2))
-	plt.tick_params(left=False,
-                bottom=False,
-                labelleft=False,
-                labelbottom=False)
-	plt.rc('font',size=12)
-
-plt.tight_layout()
-plt.savefig(Path+name+'_htp1_cluster_select.eps')
-plt.close()
+def inverse_pca(x, pca_components, pca_mean):
+    return np.matmul(x, pca_components) + pca_mean
 
 
+def main():
+    args = parse_args()
+    device = torch.device(args.device)
+
+    if not os.path.exists(args.model):
+        raise FileNotFoundError(f"Missing model file: {args.model}")
+    if not os.path.exists(args.input_meta):
+        raise FileNotFoundError(f"Missing input meta file: {args.input_meta}")
+
+    net = torch.load(args.model, map_location=device)
+    prep = torch.load(args.input_meta, map_location="cpu")
+    required_keys = ["pca_components", "pca_mean", "center", "scale"]
+    for k in required_keys:
+        if k not in prep:
+            raise KeyError(
+                f"{k} not found in {args.input_meta}. Re-run Figure6_InputPrep.py first."
+            )
+
+    x_mini = net["X_mini"].cpu()
+    ns, seqn, n = x_mini.shape
+    hidden_n = args.hidden_n
+    stop_t = args.stop_t
+    loop_n = int(prep.get("loop_n", round(seqn / 10)))
+
+    model = ElmanRNN_pred(n, hidden_n, n)
+    model.act = nn.Tanh()
+    model.load_state_dict(net["state_dict"])
+    model = model.to(device).eval()
+
+    h_t = torch.zeros(1, ns, hidden_n, device=device)
+    x_null = torch.zeros((ns, seqn, n), device=device)
+    x_null[:, :stop_t, :] = x_mini[:, :stop_t, :].to(device)
+    with torch.no_grad():
+        output, _ = model(x_null, h_t)
+        o_future = torch.zeros_like(output)
+        output_t, htp1 = model(x_mini[:, :stop_t, :].to(device), torch.zeros(1, ns, hidden_n, device=device))
+        o_future[:, :stop_t, :] = output_t.detach()
+        for t in range(seqn - stop_t):
+            xtp1 = o_future[:, stop_t + t - 1 : stop_t + t + 1, :]
+            otp1, htp1 = model(xtp1, htp1)
+            o_future[:, stop_t + t : stop_t + t + 1, :] = otp1[:, 1:, :].detach()
+
+    center = float(prep["center"])
+    scale = float(prep["scale"])
+    pca_components = np.asarray(prep["pca_components"])
+    pca_mean = np.asarray(prep["pca_mean"])
+
+    o = output.detach().cpu().numpy().reshape(ns * seqn, n)
+    o_re = inverse_pca(o * scale + center, pca_components, pca_mean)
+
+    out_prefix = args.out_prefix if args.out_prefix else args.model[:-8]
+
+    # Panel B/C: reconstruction and prediction
+    plt.figure(figsize=(20, ns))
+    count = 1
+    for i in range(ns):
+        for j in range(20):
+            plt.subplot(ns, 20, count)
+            plt.imshow(o_re[i * seqn + j, :].reshape((28, 28)))
+            frame1 = plt.gca()
+            frame1.axes.get_xaxis().set_visible(False)
+            frame1.axes.get_yaxis().set_visible(False)
+            count += 1
+    plt.tight_layout()
+    plt.savefig(out_prefix + "_O_re.pdf")
+    plt.close()
+
+    # recurrent unit activity
+    ht_seq = torch.zeros((ns, seqn, hidden_n), device=device)
+    htp1_seq = torch.zeros((ns, seqn, hidden_n), device=device)
+    ht = torch.zeros((1, ns, hidden_n), device=device)
+    with torch.no_grad():
+        for t in range(seqn):
+            ht = model.tanh(model.input_linear(x_mini[:, t, :].to(device)) + model.hidden_linear(ht))
+            htp1 = model.tanh(model.hidden_linear(ht))
+            ht_seq[:, t, :] = ht.detach()
+            htp1_seq[:, t, :] = htp1.detach()
+
+    htp1_full = htp1_seq.detach().cpu().numpy().reshape(ns * seqn, hidden_n)
+
+    # Panel D: ICA
+    ica = FastICA(n_components=10, max_iter=1000)
+    x_ic = ica.fit_transform(htp1_full)
+
+    ic1_list = np.array([0, 1, 2, 3])
+    ic2_list = np.array([0, 1, 2, 3])
+    plt.figure(figsize=(7, 7))
+    for idx in range(len(ic1_list)):
+        ic1 = ic1_list[idx]
+        ic2 = ic2_list[idx]
+        plt.subplot(2, 2, idx + 1)
+        for digit in range(10):
+            idx_digit = np.arange(loop_n) * 10 + digit
+            plt.plot(x_ic[idx_digit, ic1], x_ic[idx_digit, ic2], ".")
+        plt.xlabel("IC{}".format(ic1))
+        plt.ylabel("IC{}".format(ic2))
+        plt.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+        plt.rc("font", size=12)
+
+    plt.tight_layout()
+    plt.savefig(out_prefix + "_htp1_cluster_select.pdf")
+    plt.close()
+
+
+if __name__ == "__main__":
+    main()

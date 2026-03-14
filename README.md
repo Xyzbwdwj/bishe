@@ -8,7 +8,7 @@ https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 # Network training and analysis
 
 * Build a python environment:  
-`conda env export > environment.yml`
+`conda env create -f environment.yml`
 
 ## Simulation of predictive network (Fig.3)
 
@@ -19,7 +19,7 @@ https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 `python Main_clean.py --input data/SeqN1T100.pth.tar --ae 1 -n 1 --fixi 3 --fixo 3 --pred 1 --rnn_act relu --ac_output sigmoid --savename Elman_SGD/Sigmoid/SeqN1T100_pred_relu_fixio3`  
 
 2. Convert python output to *.mat  
-`python py2mat_ext.py `
+`python py2mat_exe.py`
 
 3. Plot the figure:  
 `MATLAB Figure3.m`

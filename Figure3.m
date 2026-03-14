@@ -101,7 +101,7 @@ text(2,12.5,['pvalue=' num2str(p,2)],'FontSize',18)
 xlabel('Optimal shift (a.u.)')
 ylabel('Counts')
 set(gca,'FontSize',18)
-saveas(f,[subpath 'ElmanSNN_RateCCG12_relu_fixio3.eps'],'epsc')
+saveas(f,[subpath 'ElmanSNN_RateCCG12_relu_fixio3.pdf'],'pdf')
 saveas(f,[subpath 'ElmanSNN_RateCCG12_relu_fixio3.png'])
 
 
@@ -141,4 +141,3 @@ histogram(lags_m(idx)*dt,-maxtau-0.5*dt:dt:maxtau+0.5*dt)
 xlabel('Peaked time (sec)')
 title('PredMdl')
 saveas(f,[subpath 'ElmanSNN_MI12_hist_fixio3.png'])
-

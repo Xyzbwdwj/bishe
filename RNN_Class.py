@@ -131,6 +131,136 @@ class ElmanRNN_pred(nn.Module):
         return out, ht
 
 
+class SurrogateSpike(torch.autograd.Function):
+    """
+    Forward: hard threshold spike.
+    Backward: smooth surrogate gradient (sigmoid derivative).
+    """
+
+    @staticmethod
+    def forward(ctx, input_tensor, slope):
+        ctx.save_for_backward(input_tensor, slope)
+        return (input_tensor > 0).to(input_tensor.dtype)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input_tensor, slope = ctx.saved_tensors
+        sigma = torch.sigmoid(slope * input_tensor)
+        grad_input = grad_output * slope * sigma * (1.0 - sigma)
+        return grad_input, None
+
+
+class _BaseElmanSNN(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+        super(_BaseElmanSNN, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.input_linear = nn.Linear(self.input_dim, self.hidden_dim)
+        self.hidden_linear = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.linear3 = nn.Linear(self.hidden_dim, self.output_dim)
+        self.act = nn.Softmax(2)
+        self.register_buffer("lif_beta", torch.tensor(float(lif_beta), dtype=torch.float32))
+        self.register_buffer("lif_threshold", torch.tensor(float(lif_threshold), dtype=torch.float32))
+        self.register_buffer("lif_reset", torch.tensor(float(lif_reset), dtype=torch.float32))
+        self.register_buffer("sg_beta", torch.tensor(float(sg_beta), dtype=torch.float32))
+
+    def _spike_fn(self, x):
+        return SurrogateSpike.apply(x, self.sg_beta)
+
+    def _lif_update(self, mem, current):
+        mem = self.lif_beta * mem + current
+        spike = self._spike_fn(mem - self.lif_threshold)
+        mem = mem - spike * self.lif_reset
+        return mem, spike
+
+    def lif_step(self, x_t, h_t):
+        mem = h_t.squeeze(0)
+        cur = self.input_linear(x_t) + self.hidden_linear(mem)
+        mem, spike = self._lif_update(mem, cur)
+        return mem.unsqueeze(0), spike.unsqueeze(0)
+
+    def lif_predict_step(self, h_t):
+        mem = h_t.squeeze(0)
+        cur = self.hidden_linear(mem)
+        mem, spike = self._lif_update(mem, cur)
+        return mem.unsqueeze(0), spike.unsqueeze(0)
+
+
+class ElmanSNN(_BaseElmanSNN):
+    # Output z_t from membrane potential m_t at each time step.
+    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+        super(ElmanSNN, self).__init__(
+            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+        )
+
+    def forward(self, x, h0):
+        batch_size, SeqN, _ = x.shape
+        ht = h0
+        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        for t in range(SeqN):
+            ht, _ = self.lif_step(x[:, t, :], ht)
+            z[:, t, :] = ht.squeeze(0)
+        out = self.act(self.linear3(z))
+        return out, ht
+
+
+class ElmanSNN_v2(_BaseElmanSNN):
+    # Return full membrane sequence as second output (for activity regularization).
+    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+        super(ElmanSNN_v2, self).__init__(
+            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+        )
+
+    def forward(self, x, h0):
+        batch_size, SeqN, _ = x.shape
+        ht = h0
+        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        for t in range(SeqN):
+            ht, _ = self.lif_step(x[:, t, :], ht)
+            z[:, t, :] = ht.squeeze(0)
+        out = self.act(self.linear3(z))
+        return out, z
+
+
+class ElmanSNN_pred(_BaseElmanSNN):
+    # One-step-ahead prediction: y_{t+1|t} from predicted LIF state.
+    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+        super(ElmanSNN_pred, self).__init__(
+            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+        )
+
+    def forward(self, x, h0):
+        batch_size, SeqN, _ = x.shape
+        ht = h0
+        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        for t in range(SeqN - 1):
+            ht, _ = self.lif_step(x[:, t, :], ht)
+            htp1, _ = self.lif_predict_step(ht)
+            z[:, t + 1, :] = htp1.squeeze(0)
+        out = self.act(self.linear3(z))
+        return out, ht
+
+
+class ElmanSNN_pred_v2(_BaseElmanSNN):
+    # One-step-ahead prediction with sequence state output.
+    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+        super(ElmanSNN_pred_v2, self).__init__(
+            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+        )
+
+    def forward(self, x, h0):
+        batch_size, SeqN, _ = x.shape
+        ht = h0
+        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        for t in range(SeqN - 1):
+            ht, _ = self.lif_step(x[:, t, :], ht)
+            htp1, _ = self.lif_predict_step(ht)
+            z[:, t + 1, :] = htp1.squeeze(0)
+        out = self.act(self.linear3(z))
+        return out, z
+
+
 class ElmanRNN_tp1(nn.Module):
     # output prediction value: y_{t+1|t} at time t
     # y_{t+1|t} = sigma(W h_{t+1})
@@ -1004,4 +1134,3 @@ class PredRec(BaseRNN):
         dLdc_accum = np.sum(dLdc, 1)
         return L, dLdV_accum, dLdW_accum, dLdU_accum, dLdb_accum, dLdc_accum
     
-

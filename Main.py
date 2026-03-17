@@ -56,6 +56,11 @@ parser.add_argument('--pred',default=0, type=int, help='whether use one-step fut
 parser.add_argument('--pred2',default=0, type=int, help='whether use multi-step future pred loss, update at each time step')
 parser.add_argument('--predfd',default=0, type=int, help='one-step future pred loss with feedback')
 parser.add_argument('--pred_d',default=0,type=int,help='multiple-step ahead prediction')
+parser.add_argument('--snn', default=0, type=int, help='replace RNN hidden dynamics with LIF spiking dynamics')
+parser.add_argument('--lif-beta', default=0.9, type=float, help='LIF leak factor')
+parser.add_argument('--lif-threshold', default=1.0, type=float, help='LIF spike threshold')
+parser.add_argument('--lif-reset', default=1.0, type=float, help='LIF reset amount after spike')
+parser.add_argument('--sg-beta', default=10.0, type=float, help='surrogate gradient slope for spike function')
 # parser.add_argument('--ownnet',default=0, type = float, help='user defined RNN')
 # parser.add_argument('--momentum', default=0.01, type=float, metavar='M',
                     # help='momentum')
@@ -79,11 +84,22 @@ def main():
     N = args.n
     hidden_N = args.hidden_n
     TotalSteps = args.total_steps
+    input_payload = None
+    inferred_n_from_input = None
+    if args.input:
+        input_payload = torch.load(args.input)
+        if 'X_mini' not in input_payload or 'Target_mini' not in input_payload:
+            raise KeyError("Input file must contain 'X_mini' and 'Target_mini'.")
+        inferred_n_from_input = int(input_payload['X_mini'].shape[2])
+        N = inferred_n_from_input
 
     global f
     f = open(args.savename+'.txt','w')
     print('Settings:', file = f)
     print(str(sys.argv), file = f)
+    if args.input:
+        print('Use user-defined input: {}'.format(args.input), file=f)
+        print('Override feature size N from --input to {:d}'.format(N), file=f)
 
 
     ## Generate network input
@@ -151,37 +167,58 @@ def main():
     if args.pred_d:
         net = ElmanRNN_pred_v3(N,hidden_N,N,args.pred_d)
         print('Network output prediction {}-step ahead'.format(str(args.pred_d)), file=f)
-    if args.relu:
+    if args.snn:
+        if args.predfd or args.pred_d:
+            raise ValueError('SNN mode currently supports base/pred/pred+Hregularized, not --predfd or --pred_d.')
+        print(
+            'Use SNN (LIF) dynamics: beta={:.3f}, threshold={:.3f}, reset={:.3f}, sg_beta={:.3f}'.format(
+                args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta
+            ),
+            file=f,
+        )
+        if args.pred and args.Hregularized:
+            net = ElmanSNN_pred_v2(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+        elif args.pred:
+            net = ElmanSNN_pred(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+        elif args.Hregularized:
+            net = ElmanSNN_v2(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+        else:
+            net = ElmanSNN(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+    if args.relu and hasattr(net, 'rnn'):
         net.rnn = nn.RNN(N,hidden_N,1,batch_first=True,nonlinearity='relu')   
     if args.fixi:
         for name,p in net.named_parameters():
-            if name == 'rnn.weight_ih_l0':
+            if name == 'rnn.weight_ih_l0' or name == 'input_linear.weight':
                 p.requires_grad = False;
-                p.data.fill_(0); p.data.fill_diagonal_(1)
+                p.data.fill_(0)
+                for i in range(min(p.data.shape[0], p.data.shape[1])):
+                    p.data[i, i] = 1
                 print('Fixing input matrix to identity matrix', file=f)
-            elif name == 'rnn.bias_ih_l0':
+            elif name == 'rnn.bias_ih_l0' or name == 'input_linear.bias':
                 p.requires_grad = False; 
                 p.data.fill_(0)
                 print('Fixing input bias to 0', file = f)
     if args.nobias:
         for name,p in net.named_parameters():
-            if name == 'rnn.bias_hh_l0':
+            if name == 'rnn.bias_hh_l0' or name == 'hidden_linear.bias':
                 p.requires_grad = False;
                 p.data.fill_(0)
                 print('Fixing RNN bias to 0', file=f)
     if args.fixw:
         for name,p in net.named_parameters():
-            if name == 'rnn.weight_hh_l0':
+            if name == 'rnn.weight_hh_l0' or name == 'hidden_linear.weight':
                 p.requires_grad = False;
                 p.data = torch.rand(p.data.shape)*2*1/np.sqrt(N) - 1/np.sqrt(N)
                 print('Fixing recurrent matrix to a random matrix', file=f)
-            elif name == 'rnn.bias_hh_l0':
+            elif name == 'rnn.bias_hh_l0' or name == 'hidden_linear.bias':
                 p.requires_grad = False; 
                 p.data.fill_(0)
                 print('Fixing input bias to 0', file = f )
-    if args.custom:
+    if args.custom and not args.snn:
         print('randomly zero out hidden unit activity', file = f)
         net = ElmanRNN_sparse(N,hidden_N,N,args.custom)
+    elif args.custom and args.snn:
+        print('Ignore --custom in SNN mode (only implemented for nn.RNN path)', file=f)
     if args.ac_output == 'tanh':
         net.act = nn.Tanh()
         print('Change output activation function to tanh', file = f)
@@ -224,9 +261,8 @@ def main():
 
     ## if use user-defined input
     if args.input:
-        loaded = torch.load(args.input)
-        X_mini = loaded['X_mini']
-        Target_mini = loaded['Target_mini']
+        X_mini = input_payload['X_mini']
+        Target_mini = input_payload['Target_mini']
 
     print(X_mini.shape)
     # H0 value
@@ -306,11 +342,18 @@ def main():
 
     # save network input, state 
     save_dict = {'state_dict': net.state_dict(),
+        'model_name': net.__class__.__name__,
         'y_hat': y_hat,
         'X_mini': X_mini.cpu(),
         'Target_mini': Target_mini.cpu(),
         'hidden': hidden,
         'loss': loss_list}
+    if args.snn:
+        save_dict['snn'] = 1
+        save_dict['lif_beta'] = args.lif_beta
+        save_dict['lif_threshold'] = args.lif_threshold
+        save_dict['lif_reset'] = args.lif_reset
+        save_dict['sg_beta'] = args.sg_beta
     if args.partial:
         save_dict['Mask_W'] = Mask_W; save_dict['Mask_B'] = Mask_B
     torch.save(save_dict, args.savename+'.pth.tar')

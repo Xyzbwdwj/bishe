@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from sklearn.decomposition import FastICA
 
-from RNN_Class import ElmanRNN_pred
+from RNN_Class import ElmanRNN_pred, ElmanSNN_pred
 
 
 def parse_args():
@@ -30,6 +30,11 @@ def parse_args():
     parser.add_argument("--hidden-n", default=200, type=int, help="Hidden size")
     parser.add_argument("--stop-t", default=17, type=int, help="Teacher-forcing stop time")
     parser.add_argument("--device", default="cpu", type=str, help="cpu or cuda:0")
+    parser.add_argument("--snn", default=0, type=int, help="Force SNN model path")
+    parser.add_argument("--lif-beta", default=0.9, type=float, help="LIF leak factor")
+    parser.add_argument("--lif-threshold", default=1.0, type=float, help="LIF spike threshold")
+    parser.add_argument("--lif-reset", default=1.0, type=float, help="LIF reset amount")
+    parser.add_argument("--sg-beta", default=10.0, type=float, help="Spike surrogate gradient slope")
     parser.add_argument(
         "--out-prefix",
         default="",
@@ -52,7 +57,7 @@ def main():
     if not os.path.exists(args.input_meta):
         raise FileNotFoundError(f"Missing input meta file: {args.input_meta}")
 
-    net = torch.load(args.model, map_location=device)
+    checkpoint = torch.load(args.model, map_location=device)
     prep = torch.load(args.input_meta, map_location="cpu")
     required_keys = ["pca_components", "pca_mean", "center", "scale"]
     for k in required_keys:
@@ -61,15 +66,29 @@ def main():
                 f"{k} not found in {args.input_meta}. Re-run Figure6_InputPrep.py first."
             )
 
-    x_mini = net["X_mini"].cpu()
+    x_mini = checkpoint["X_mini"].cpu()
     ns, seqn, n = x_mini.shape
-    hidden_n = args.hidden_n
+    hidden_n = int(checkpoint["state_dict"]["linear3.weight"].shape[1]) if "linear3.weight" in checkpoint["state_dict"] else args.hidden_n
     stop_t = args.stop_t
     loop_n = int(prep.get("loop_n", round(seqn / 10)))
 
-    model = ElmanRNN_pred(n, hidden_n, n)
+    ckpt_snn = int(checkpoint.get("snn", 0)) == 1
+    ckpt_name = checkpoint.get("model_name", "")
+    use_snn = bool(args.snn) or ckpt_snn or str(ckpt_name).startswith("ElmanSNN")
+    if use_snn:
+        model = ElmanSNN_pred(
+            n,
+            hidden_n,
+            n,
+            lif_beta=float(checkpoint.get("lif_beta", args.lif_beta)),
+            lif_threshold=float(checkpoint.get("lif_threshold", args.lif_threshold)),
+            lif_reset=float(checkpoint.get("lif_reset", args.lif_reset)),
+            sg_beta=float(checkpoint.get("sg_beta", args.sg_beta)),
+        )
+    else:
+        model = ElmanRNN_pred(n, hidden_n, n)
     model.act = nn.Tanh()
-    model.load_state_dict(net["state_dict"])
+    model.load_state_dict(checkpoint["state_dict"])
     model = model.to(device).eval()
 
     h_t = torch.zeros(1, ns, hidden_n, device=device)
@@ -115,11 +134,18 @@ def main():
     htp1_seq = torch.zeros((ns, seqn, hidden_n), device=device)
     ht = torch.zeros((1, ns, hidden_n), device=device)
     with torch.no_grad():
-        for t in range(seqn):
-            ht = model.tanh(model.input_linear(x_mini[:, t, :].to(device)) + model.hidden_linear(ht))
-            htp1 = model.tanh(model.hidden_linear(ht))
-            ht_seq[:, t, :] = ht.detach()
-            htp1_seq[:, t, :] = htp1.detach()
+        if use_snn:
+            for t in range(seqn):
+                ht, _ = model.lif_step(x_mini[:, t, :].to(device), ht)
+                htp1, _ = model.lif_predict_step(ht)
+                ht_seq[:, t, :] = ht.detach().squeeze(0)
+                htp1_seq[:, t, :] = htp1.detach().squeeze(0)
+        else:
+            for t in range(seqn):
+                ht = model.tanh(model.input_linear(x_mini[:, t, :].to(device)) + model.hidden_linear(ht))
+                htp1 = model.tanh(model.hidden_linear(ht))
+                ht_seq[:, t, :] = ht.detach()
+                htp1_seq[:, t, :] = htp1.detach()
 
     htp1_full = htp1_seq.detach().cpu().numpy().reshape(ns * seqn, hidden_n)
 

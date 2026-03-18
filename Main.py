@@ -57,6 +57,8 @@ parser.add_argument('--pred2',default=0, type=int, help='whether use multi-step 
 parser.add_argument('--predfd',default=0, type=int, help='one-step future pred loss with feedback')
 parser.add_argument('--pred_d',default=0,type=int,help='multiple-step ahead prediction')
 parser.add_argument('--snn', default=0, type=int, help='replace RNN hidden dynamics with LIF spiking dynamics')
+parser.add_argument('--auto-snn-tune', default=1, type=int, help='auto-apply stable defaults for SNN (Adam/lr/grad-clip)')
+parser.add_argument('--grad-clip', default=0.0, type=float, help='global grad-norm clipping value (0 disables)')
 parser.add_argument('--lif-beta', default=0.9, type=float, help='LIF leak factor')
 parser.add_argument('--lif-threshold', default=1.0, type=float, help='LIF spike threshold')
 parser.add_argument('--lif-reset', default=1.0, type=float, help='LIF reset amount after spike')
@@ -77,6 +79,13 @@ def main():
     global args
 
     args = parser.parse_args()
+    if args.snn and args.auto_snn_tune:
+        if args.lr == parser.get_default('lr'):
+            args.lr = 0.001
+        if args.grad_clip <= 0:
+            args.grad_clip = 1.0
+        if args.adam == 0:
+            args.adam = 1
     lr = args.lr
     n_epochs = args.epochs
     RecordEp = args.print_freq
@@ -102,51 +111,64 @@ def main():
         print('Override feature size N from --input to {:d}'.format(N), file=f)
 
 
-    ## Generate network input
-    # Circular input
-    X,Target = BellShape_input(N,TotalSteps)
-    if args.input_osci:
-        X,Target = Cos_input(N,TotalSteps,args.input_osci)
-    # sparse input signal
-    if args.sparsity:
-        print('sparsity of input: {}'.format(args.sparsity),file=f)
-        N_pre = np.int64(N*args.sparsity)
-        X_pre,tmp = BellShape_input(N_pre,TotalSteps)
-        np.random.seed(2); idx_active1 = np.random.choice(N,N_pre)
-        np.random.seed(3); idx_active2 = np.random.choice(N,N_pre)
-        X = np.zeros((N,TotalSteps)); Target = np.zeros((N,TotalSteps))
-        X[idx_active1,:] = X_pre; Target[idx_active2,:] = X_pre
-    # noisy input
-    if args.noisy:
-        if args.noisy2:
-            print('Noisy input ({:d}% of each element)'.format(args.noisy),file=f)
-            X = X + args.noisy/100*X*np.random.normal(0,1,X.shape)
-        else:
-            print('Noisy input ({:d}% of maximum)'.format(args.noisy),file=f)
-            sd = args.noisy*np.max(X)/100
-            X = X + np.random.normal(0,1,X.shape)*sd
-            X = X / np.amax(abs(X))
-    if args.noisytrain:
-        print('Noisy input ({:d}%), Stochastic input and output during training'.format(args.noisy),file=f)
+    if args.auto_snn_tune and args.snn:
+        print(
+            'Auto SNN tune enabled: optimizer={}, lr={}, grad_clip={}'.format(
+                'Adam' if args.adam else 'SGD', args.lr, args.grad_clip
+            ),
+            file=f,
+        )
 
-    # Prepare input and target for the model: decrease the time resolution
-    if args.one_sample:
-        print('One travesal as one sample: SeqN={:d}'.format(SeqN), file=f)
-        Select_T = np.arange(0,TotalSteps,np.int64(TotalSteps/SeqN),dtype=int)
-        tmp = np.expand_dims((X[:,Select_T].T),axis=0)
-        X_mini = torch.tensor(tmp.astype(np.single))
-        tmp = np.expand_dims((Target[:,Select_T].T),axis=0)
-        Target_mini = torch.tensor(tmp.astype(np.single)) # Output: (batch*seq*feature)
+    ## Generate network input unless a prebuilt sequence is provided.
+    if args.input:
+        X_mini = input_payload['X_mini']
+        Target_mini = input_payload['Target_mini']
+        print('Loaded input tensor shape: {}'.format(tuple(X_mini.shape)), file=f)
     else:
-        print('Splitting into multiple samples', file=f)
-        b_idx = np.arange(0,X.shape[1],SeqN)
-        X_batch = np.zeros((b_idx.shape[0],SeqN,np.int64(N))) #NBatch * NSeq * NFeature
-        Target_batch = np.zeros((b_idx.shape[0],SeqN,np.int64(N)))
-        for i in range(b_idx.shape[0]):
-            X_batch[i,:,:] = X[:,b_idx[i]:b_idx[i]+SeqN].T
-            Target_batch[i,:,:] = Target[:,b_idx[i]:b_idx[i]+SeqN].T
-        X_mini = torch.tensor(X_batch.astype(np.single))
-        Target_mini = torch.tensor(Target_batch.astype(np.single))
+        # Circular input
+        X,Target = BellShape_input(N,TotalSteps)
+        if args.input_osci:
+            X,Target = Cos_input(N,TotalSteps,args.input_osci)
+        # sparse input signal
+        if args.sparsity:
+            print('sparsity of input: {}'.format(args.sparsity),file=f)
+            N_pre = np.int64(N*args.sparsity)
+            X_pre,tmp = BellShape_input(N_pre,TotalSteps)
+            np.random.seed(2); idx_active1 = np.random.choice(N,N_pre)
+            np.random.seed(3); idx_active2 = np.random.choice(N,N_pre)
+            X = np.zeros((N,TotalSteps)); Target = np.zeros((N,TotalSteps))
+            X[idx_active1,:] = X_pre; Target[idx_active2,:] = X_pre
+        # noisy input
+        if args.noisy:
+            if args.noisy2:
+                print('Noisy input ({:d}% of each element)'.format(args.noisy),file=f)
+                X = X + args.noisy/100*X*np.random.normal(0,1,X.shape)
+            else:
+                print('Noisy input ({:d}% of maximum)'.format(args.noisy),file=f)
+                sd = args.noisy*np.max(X)/100
+                X = X + np.random.normal(0,1,X.shape)*sd
+                X = X / np.amax(abs(X))
+        if args.noisytrain:
+            print('Noisy input ({:d}%), Stochastic input and output during training'.format(args.noisy),file=f)
+
+        # Prepare input and target for the model: decrease the time resolution
+        if args.one_sample:
+            print('One travesal as one sample: SeqN={:d}'.format(SeqN), file=f)
+            Select_T = np.arange(0,TotalSteps,np.int64(TotalSteps/SeqN),dtype=int)
+            tmp = np.expand_dims((X[:,Select_T].T),axis=0)
+            X_mini = torch.tensor(tmp.astype(np.single))
+            tmp = np.expand_dims((Target[:,Select_T].T),axis=0)
+            Target_mini = torch.tensor(tmp.astype(np.single)) # Output: (batch*seq*feature)
+        else:
+            print('Splitting into multiple samples', file=f)
+            b_idx = np.arange(0,X.shape[1],SeqN)
+            X_batch = np.zeros((b_idx.shape[0],SeqN,np.int64(N))) #NBatch * NSeq * NFeature
+            Target_batch = np.zeros((b_idx.shape[0],SeqN,np.int64(N)))
+            for i in range(b_idx.shape[0]):
+                X_batch[i,:,:] = X[:,b_idx[i]:b_idx[i]+SeqN].T
+                Target_batch[i,:,:] = Target[:,b_idx[i]:b_idx[i]+SeqN].T
+            X_mini = torch.tensor(X_batch.astype(np.single))
+            Target_mini = torch.tensor(Target_batch.astype(np.single))
 
     ##  define network module
     net = ElmanRNN_pytorch_module(N,hidden_N,N)
@@ -258,11 +280,6 @@ def main():
     if args.ae:
         print('Autoencoder scenario: Target = Input', file = f)
         Target_mini = X_mini
-
-    ## if use user-defined input
-    if args.input:
-        X_mini = input_payload['X_mini']
-        Target_mini = input_payload['Target_mini']
 
     print(X_mini.shape)
     # H0 value
@@ -444,10 +461,15 @@ def train_partial(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer, 
             loss = criterion(output[:,args.pred_d:,:],Target_mini[:,args.pred_d:,:])
         else:        
             loss = criterion(output[:,1:,:],Target_mini[:,1:,:]) # ignore the first time step
+        if not torch.isfinite(loss):
+            print('Non-finite loss at epoch {}. Stop training early.'.format(epoch), file=f)
+            break
         loss.backward() # Does backpropagation and calculates gradients
         for l,p in enumerate(net.parameters()):
             if p.requires_grad:
                 p.grad.data[torch.from_numpy(Mask[l].astype(bool))] = 0
+        if args.grad_clip and args.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(net.parameters(), args.grad_clip)
         optimizer.step() # Updates the weights accordingly
         if epoch > 1000:
             diff = [loss_list[i+1]-loss_list[i] for i in range(len(loss_list)-1)]
@@ -580,7 +602,7 @@ def train_interleaved(X_mini, Target_mini, h0, n_epochs, net, criterion, optimiz
     loss_list = []
     h_t = h0
     y_hat = np.zeros((batch_size,np.int64(n_epochs/RecordEp),X_mini.shape[1],X_mini.shape[2]))
-    hidden = np.zeros((batch_size,np.int64(n_epochs/RecordEp),X_mini.shape[1],X_mini.shape[2]))
+    hidden = np.zeros((batch_size,np.int64(n_epochs/RecordEp),X_mini.shape[1],h_t.shape[2]))
     start = time.time()
     for epoch in range(n_epochs):
         for b in np.arange(batch_size):
@@ -633,7 +655,7 @@ def train_interval(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer,
     loss_list = []
     h_t = h0
     y_hat = np.zeros((batch_size,np.int64(n_epochs/RecordEp),X_mini.shape[1],X_mini.shape[2]))
-    hidden = np.zeros((batch_size,np.int64(n_epochs/RecordEp),X_mini.shape[1],X_mini.shape[2]))
+    hidden = np.zeros((batch_size,np.int64(n_epochs/RecordEp),X_mini.shape[1],h_t.shape[2]))
     start = time.time()
     for epoch in range(n_epochs):
         for b in np.arange(batch_size):

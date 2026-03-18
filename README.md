@@ -32,6 +32,11 @@ https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 2. Plot the figures:  
 `python Figure4.py`
 
+## OOM-safe SNN long training (50k)
+
+Run the preconfigured anti-OOM batch script:
+`bash train_all_snn.sh`
+
 
 ## Localization (Fig.5)
 1. Traj_Generate.m: simulation code for straight line exploration (Main reference: https://www.pnas.org/doi/10.1073/pnas.2018422118)  

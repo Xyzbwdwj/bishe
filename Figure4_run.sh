@@ -11,10 +11,17 @@ cd "$(dirname "$0")"
 # Defaults are a quick "smoke" run so Figure4.py can complete on CPU.
 # Set FULL_RUN=1 for long/full training settings.
 
-PY="${PY:-python}"
-GPU="${GPU:-0}"
+PY="${PY:-python3}"
+if [[ -z "${GPU:-}" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    GPU=1
+  else
+    GPU=0
+  fi
+fi
 MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"
 export MPLCONFIGDIR
+echo "[info] GPU mode: $GPU (set GPU=0/1 manually to override)"
 
 if [[ "${FULL_RUN:-0}" == "1" ]]; then
   MAIN_S4_EPOCHS=50000

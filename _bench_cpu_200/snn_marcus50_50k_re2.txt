@@ -1,0 +1,11 @@
+Settings:
+['Main.py', '--epochs', '200', '--gpu', '0', '--pred', '1', '--snn', '1', '--auto-snn-tune', '0', '--adam', '1', '--lr', '0.001', '--lr_step', '10000,20000,30000,40000', '--grad-clip', '2.0', '--sg-beta', '5', '--ac_output', 'tanh', '--input', 'data/InputNs50_SeqN100_StraightTraj_Marcus_v2.pth.tar', '--savename', '_bench_cpu_200/snn_marcus50_50k_re2', '--hidden-n', '128', '--print-freq', '200', '--grad-clip', '1.0']
+Use user-defined input: data/InputNs50_SeqN100_StraightTraj_Marcus_v2.pth.tar
+Override feature size N from --input to 200
+Loaded input tensor shape: (50, 100, 200)
+Network output prediction one-step ahead
+Use SNN (LIF) dynamics: beta=0.900, threshold=1.000, reset=1.000, sg_beta=5.000
+Change output activation function to tanh
+Cuda device availability: False
+Using ADAM optimizer
+Total training time: 0.4 minuetes

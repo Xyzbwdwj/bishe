@@ -42,6 +42,17 @@ parser.add_argument('--ac_output', default='', type=str, help='set the output ac
 parser.add_argument('--pred',default=0, type=int, help='whether use one-step future pred loss')
 parser.add_argument('--noisy_train',default=0, type=float, help='whether add noise at each training step (default: None)')
 
+def torch_load_compat(path, map_location=None):
+    """Support old checkpoints on PyTorch>=2.6 where weights_only defaults to True."""
+    try:
+        if map_location is None:
+            return torch.load(path, weights_only=False)
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        if map_location is None:
+            return torch.load(path)
+        return torch.load(path, map_location=map_location)
+
 
 def main():
     global args
@@ -59,7 +70,7 @@ def main():
     print(str(sys.argv), file = f)
 
     ## load in input
-    loaded = torch.load(args.input)
+    loaded = torch_load_compat(args.input)
     X_mini = loaded['X_mini']
     Target_mini = loaded['Target_mini']
     if args.ae:
@@ -141,7 +152,7 @@ def main():
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading previous network '{}'".format(args.resume), file=f)
-            checkpoint = torch.load(args.resume)
+            checkpoint = torch_load_compat(args.resume)
             net.load_state_dict(checkpoint['state_dict'])
             print("=> loaded previous network '{}' ".format(args.resume), file=f)
         else:
@@ -150,11 +161,17 @@ def main():
     # H0 value
     h0 = torch.zeros(1,X_mini.shape[0],hidden_N) # n_layers * BatchN * NHidden
 
-    ## enable GPU computing
-    if args.gpu:
-        print('Cuda device availability: {}'.format(torch.cuda.is_available()), file=f)
-        criterion = criterion.cuda(); net= net.cuda()
-        X_mini = X_mini.cuda(); Target_mini = Target_mini.cuda(); h0 = h0.cuda()
+    ## enable GPU computing (with safe fallback to CPU)
+    use_cuda = bool(args.gpu) and torch.cuda.is_available()
+    if args.gpu and not use_cuda:
+        print('CUDA requested (gpu={}) but unavailable. Falling back to CPU.'.format(args.gpu), file=f)
+    print('Cuda device availability: {}'.format(torch.cuda.is_available()), file=f)
+    if use_cuda:
+        criterion = criterion.cuda()
+        net = net.cuda()
+        X_mini = X_mini.cuda()
+        Target_mini = Target_mini.cuda()
+        h0 = h0.cuda()
 
     # construct optimizer
     optimizer = torch.optim.SGD(net.parameters(), lr=lr)

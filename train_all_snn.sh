@@ -3,10 +3,19 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PY="${PY:-python}"
-GPU="${GPU:-0}"
+PY="${PY:-python3}"
+if [[ -z "${GPU:-}" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    GPU=1
+  else
+    GPU=0
+  fi
+fi
 OUT_DIR="${OUT_DIR:-_smoke}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-50000}"
+PF_SEQ="${PF_SEQ:-500}"
+PF_NS200="${PF_NS200:-500}"
+PF_MARCUS="${PF_MARCUS:-10000}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-$PWD/.cache/matplotlib}"
 
 # Reduce host-memory pressure from BLAS/OpenMP thread pools.
@@ -16,6 +25,12 @@ export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 
 mkdir -p "$OUT_DIR"
+echo "[info] GPU mode: $GPU (set GPU=0/1 manually to override)"
+
+# Keep Main.py's recorder dimensions valid for short smoke runs.
+if (( TOTAL_EPOCHS < PF_SEQ )); then PF_SEQ="$TOTAL_EPOCHS"; fi
+if (( TOTAL_EPOCHS < PF_NS200 )); then PF_NS200="$TOTAL_EPOCHS"; fi
+if (( TOTAL_EPOCHS < PF_MARCUS )); then PF_MARCUS="$TOTAL_EPOCHS"; fi
 
 if ! "$PY" -c "import torch" >/dev/null 2>&1; then
   echo "[error] '$PY' cannot import torch. Activate your training env first."
@@ -62,12 +77,12 @@ run_case() {
 # 1) Small input: keep baseline settings.
 run_case "snn_seq1_50k_re2" "data/SeqN1T100.pth.tar" \
   --hidden-n 200 \
-  --print-freq 500
+  --print-freq "$PF_SEQ"
 
 # 2) Ns200 input: keep baseline settings.
 run_case "snn_ns200_50k_re2" "data/Ns200_SeqN100_1.pth.tar" \
   --hidden-n 200 \
-  --print-freq 500
+  --print-freq "$PF_NS200"
 
 # 3) Marcus50 input (batch=50): anti-OOM settings.
 # - Lower hidden size
@@ -75,7 +90,7 @@ run_case "snn_ns200_50k_re2" "data/Ns200_SeqN100_1.pth.tar" \
 # - Keep full-batch updates for speed (interleaved is too slow for 50k)
 run_case "snn_marcus50_50k_re2" "data/InputNs50_SeqN100_StraightTraj_Marcus_v2.pth.tar" \
   --hidden-n 128 \
-  --print-freq 10000 \
+  --print-freq "$PF_MARCUS" \
   --grad-clip 1.0
 
 echo "Done."

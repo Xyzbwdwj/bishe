@@ -47,6 +47,17 @@ parser.add_argument('--Hregularized',default=0,type=float,help='penalty for hidd
 parser.add_argument('--fixi', default=0, type=int, help='whether fix the input matrix')
 parser.add_argument('--clip', default=0, type=float, help='whether to clip gradient or not')
 
+def torch_load_compat(path, map_location=None):
+    """Support old checkpoints on PyTorch>=2.6 where weights_only defaults to True."""
+    try:
+        if map_location is None:
+            return torch.load(path, weights_only=False)
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        if map_location is None:
+            return torch.load(path)
+        return torch.load(path, map_location=map_location)
+
 
 def main():
     global args
@@ -62,7 +73,7 @@ def main():
     print(str(sys.argv), file = f)
 
     if args.input:
-        loaded = torch.load(args.input)
+        loaded = torch_load_compat(args.input)
         X = loaded['X_mini']
         Y = loaded['Target_mini']
     if args.ae:
@@ -109,21 +120,39 @@ def main():
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading previous network '{}'".format(args.resume), file=f)
-            checkpoint = torch.load(args.resume)
+            checkpoint = torch_load_compat(args.resume)
             net.load_state_dict(checkpoint['state_dict'])
         else:
             print("=> no checkpoint found at '{}'".format(args.resume), file=f)
 
 
-    ## enable GPU computing
-    if args.gpu==1:
-        print('Cuda device availability: {}'.format(torch.cuda.is_available()), file=f)
-        criterion = criterion.cuda(); net= net.cuda()
-        X = X.cuda(); h0 = h0.cuda(); Y = Y.cuda()  
-    elif args.gpu>1:
-        print('Cuda device availability: {}'.format(torch.cuda.is_available()), file=f)
-        criterion = criterion.cuda(args.gpu-1); net= net.cuda(args.gpu-1)
-        X = X.cuda(args.gpu-1); h0 = h0.cuda(args.gpu-1); Y = Y.cuda(args.gpu-1)
+    ## enable GPU computing (with safe fallback to CPU)
+    cuda_available = torch.cuda.is_available()
+    print('Cuda device availability: {}'.format(cuda_available), file=f)
+    if args.gpu and not cuda_available:
+        print('CUDA requested (gpu={}) but unavailable. Falling back to CPU.'.format(args.gpu), file=f)
+    if args.gpu and cuda_available:
+        if args.gpu > 1:
+            dev_id = args.gpu - 1
+            if dev_id >= torch.cuda.device_count():
+                print(
+                    'Requested CUDA device {} not found (count={}). Falling back to cuda:0.'.format(
+                        dev_id, torch.cuda.device_count()
+                    ),
+                    file=f,
+                )
+                dev_id = 0
+            criterion = criterion.cuda(dev_id)
+            net = net.cuda(dev_id)
+            X = X.cuda(dev_id)
+            h0 = h0.cuda(dev_id)
+            Y = Y.cuda(dev_id)
+        else:
+            criterion = criterion.cuda()
+            net = net.cuda()
+            X = X.cuda()
+            h0 = h0.cuda()
+            Y = Y.cuda()
 
     # construct optimizer
     optimizer = torch.optim.SGD(net.parameters(), lr=lr)

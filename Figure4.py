@@ -14,7 +14,10 @@ matplotlib.rc('font', **font)
 plt.rcParams.update({"text.usetex": shutil.which("latex") is not None})
 
 def load_torch_cpu(path):
-	return torch.load(path, map_location='cpu')
+	try:
+		return torch.load(path, map_location='cpu', weights_only=False)
+	except TypeError:
+		return torch.load(path, map_location='cpu')
 
 
 # Panel A: Inputs: 

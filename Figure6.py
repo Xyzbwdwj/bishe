@@ -47,6 +47,17 @@ def parse_args():
 def inverse_pca(x, pca_components, pca_mean):
     return np.matmul(x, pca_components) + pca_mean
 
+def torch_load_compat(path, map_location=None):
+    """Support old checkpoints on PyTorch>=2.6 where weights_only defaults to True."""
+    try:
+        if map_location is None:
+            return torch.load(path, weights_only=False)
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        if map_location is None:
+            return torch.load(path)
+        return torch.load(path, map_location=map_location)
+
 
 def main():
     args = parse_args()
@@ -57,8 +68,8 @@ def main():
     if not os.path.exists(args.input_meta):
         raise FileNotFoundError(f"Missing input meta file: {args.input_meta}")
 
-    checkpoint = torch.load(args.model, map_location=device)
-    prep = torch.load(args.input_meta, map_location="cpu")
+    checkpoint = torch_load_compat(args.model, map_location=device)
+    prep = torch_load_compat(args.input_meta, map_location="cpu")
     required_keys = ["pca_components", "pca_mean", "center", "scale"]
     for k in required_keys:
         if k not in prep:

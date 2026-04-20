@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT_DIR"
 
 # Usage:
-#   bash Figure4_run.sh
-#   PY=/path/to/python bash Figure4_run.sh
-#   FULL_RUN=1 bash Figure4_run.sh
+#   bash figures/Figure4_run.sh
+#   PY=/path/to/python bash figures/Figure4_run.sh
+#   FULL_RUN=1 bash figures/Figure4_run.sh
 #
 # Defaults are a quick "smoke" run so Figure4.py can complete on CPU.
 # Set FULL_RUN=1 for long/full training settings.
@@ -122,4 +124,4 @@ for noise in 5 10 20 30 40 50; do
 done
 
 echo "Done. Next step:"
-echo "  $PY Figure4.py"
+echo "  $PY figures/Figure4.py"

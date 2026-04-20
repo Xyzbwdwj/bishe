@@ -1,6 +1,8 @@
 import argparse
 import os
 import re
+import sys
+from pathlib import Path
 import numpy as np
 import matplotlib
 
@@ -9,6 +11,10 @@ import matplotlib.pyplot as plt
 import scipy
 import torch
 import torch.nn as nn
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from RNN_Class import ElmanRNN, ElmanRNN_tp1
 from helper import Grid_PF, MI_Grid

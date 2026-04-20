@@ -32,7 +32,7 @@ print("Saved MNIST arrays:", X.shape, y.shape)
 PY
 
 echo "[2/4] Build PCA sequence input"
-"$PY" Figure6_InputPrep.py --out Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar
+"$PY" figures/Figure6_InputPrep.py --out Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar
 
 echo "[3/4] Train RNN/SNN compare runs"
 for seed in $SEEDS; do

@@ -1,5 +1,7 @@
 import argparse
 import os
+import sys
+from pathlib import Path
 
 import matplotlib
 
@@ -9,6 +11,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.decomposition import FastICA
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from RNN_Class import ElmanRNN_pred, ElmanSNN_pred
 

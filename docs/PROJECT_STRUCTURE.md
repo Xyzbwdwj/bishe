@@ -3,8 +3,8 @@
 ## Source Code
 - `Main.py`, `Main_clean.py`, `Main_s4.py`, `Main_local.py`: training entry points.
 - `RNN_Class.py`, `helper.py`: model and utilities.
-- `Figure3.py`, `Figure4.py`, `Figure5.py`, `Figure6.py`, `Figure7.py`, `Figure6_InputPrep.py`, `IO_plot.py`: figure scripts.
-- `Figure3.m`, `Localization/Traj_Generate.m`, `NeuralEvidence/*.m`: MATLAB analysis scripts.
+- `figures/`: figure scripts (`Figure3.py`, `Figure4.py`, `Figure5.py`, `Figure6.py`, `Figure7.py`, `Figure6_InputPrep.py`, `IO_plot.py`, `Figure4_run.sh`, `Figure3.m`).
+- `Localization/Traj_Generate.m`, `NeuralEvidence/*.m`: MATLAB analysis scripts.
 
 ## Data
 - `data/*.pth.tar`, `data/data_pca.pkl`: compact inputs required by scripts.

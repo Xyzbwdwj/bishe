@@ -4,7 +4,7 @@ https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 ## Repository Layout
 
 - `Main.py`, `Main_clean.py`, `Main_s4.py`, `Main_local.py`, `RNN_Class.py`, `helper.py`: core training and model code.
-- `Figure*.py`, `Figure3.m`: figure-specific plotting / experiment scripts.
+- `figures/`: figure-specific plotting / experiment scripts (`Figure*.py`, `Figure3.m`, `Figure4_run.sh`, `IO_plot.py`).
 - `data/`: compact project inputs tracked in Git (custom `.pth.tar` and PCA file).
 - `Localization/`: trajectory generation and localization preprocessing.
 - `NeuralEvidence/`: Allen data access helpers and MATLAB analysis scripts for Fig.2.
@@ -14,7 +14,7 @@ https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 ## GitHub Submission Notes
 
 - Training outputs and checkpoints are intentionally excluded from version control (`Elman_SGD/`, `official_snn/`, `_bench_cpu_*`, `_smoke*`, `logs/`).
-- Downloaded MNIST raw files (`data/mnist_torchvision/`) are excluded; rerun `python Figure6_InputPrep.py` to regenerate.
+- Downloaded MNIST raw files (`data/mnist_torchvision/`) are excluded; rerun `python figures/Figure6_InputPrep.py` to regenerate.
 - `mnist_compare` generated run artifacts (`*.pth.tar`, run `*.txt`, run `*.png`) are excluded; keep scripts and summary tables for reproducibility.
 
 # NeuralEvidence (Fig.2)
@@ -38,15 +38,15 @@ https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 `python py2mat_exe.py`
 
 3. Plot the figure:  
-`MATLAB Figure3.m`
+`MATLAB figures/Figure3.m`
 
 ## Simulation of CA1 and CA3 place cells (Fig.4)
 
 1. Train the models: 
-`./Figure4_run.sh`
+`bash figures/Figure4_run.sh`
 
 2. Plot the figures:  
-`python Figure4.py`
+`python figures/Figure4.py`
 
 ## OOM-safe SNN long training (50k)
 
@@ -73,18 +73,18 @@ python Main_s4.py --epochs 30000 --batch-size 5 --hidden-n 500 --net ElmanRNN_tp
 done`
 
 4. Plot the figure:
-`python Figure5.py`
+`python figures/Figure5.py`
 
 ## MNIST sequence learning (Fig.6)
 
 1. Generate MNIST inputs:  
-`python Figure6_InputPrep.py`
+`python figures/Figure6_InputPrep.py`
 
 2. Train models:  
 `python Main.py  -n 68 --input MNIST_68PC_SeqN100_Ns5.pth.tar --lr 0.0002 --pred 1 --partial 0.2 --ac_output tanh --Hregularized 1 --epochs 10000 -p 100 --savename Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5_partial`
 
 3. Plot the figure:  
-`python Figure6.py`
+`python figures/Figure6.py`
 
 ## Local RNN training (Fig.7)
 
@@ -92,4 +92,4 @@ done`
 `python Main_local.py --n 68 --hidden_n 100 --inputfile 'data/data_pca.pkl' --savename 'mnist_local' --learning_alg 'local' --epochs 500001 --lr 0.001 --t 10`
 
 2. Plot the figure:  
-`python Figure7.py`
+`python figures/Figure7.py`

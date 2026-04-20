@@ -63,6 +63,7 @@ parser.add_argument('--lif-beta', default=0.9, type=float, help='LIF leak factor
 parser.add_argument('--lif-threshold', default=1.0, type=float, help='LIF spike threshold')
 parser.add_argument('--lif-reset', default=1.0, type=float, help='LIF reset amount after spike')
 parser.add_argument('--sg-beta', default=10.0, type=float, help='surrogate gradient slope for spike function')
+parser.add_argument('--seed', default=-1, type=int, help='random seed for reproducibility (-1 disables)')
 # parser.add_argument('--ownnet',default=0, type = float, help='user defined RNN')
 # parser.add_argument('--momentum', default=0.01, type=float, metavar='M',
                     # help='momentum')
@@ -90,6 +91,11 @@ def main():
     global args
 
     args = parser.parse_args()
+    if args.seed >= 0:
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
     if args.snn and args.auto_snn_tune:
         if args.lr == parser.get_default('lr'):
             args.lr = 0.001

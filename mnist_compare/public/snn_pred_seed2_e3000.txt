@@ -1,0 +1,11 @@
+Settings:
+['Main.py', '--gpu', '0', '--epochs', '3000', '-p', '500', '--input', 'Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar', '--pred', '1', '--snn', '1', '--auto-snn-tune', '0', '--ac_output', 'tanh', '--adam', '1', '--lr', '0.001', '--sg-beta', '5', '--grad-clip', '2.0', '--seed', '2', '--savename', 'mnist_compare/public/snn_pred_seed2_e3000']
+Use user-defined input: Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar
+Override feature size N from --input to 68
+Loaded input tensor shape: (5, 100, 68)
+Network output prediction one-step ahead
+Use SNN (LIF) dynamics: beta=0.900, threshold=1.000, reset=1.000, sg_beta=5.000
+Change output activation function to tanh
+Cuda device availability: False
+Using ADAM optimizer
+Total training time: 8.7 minuetes

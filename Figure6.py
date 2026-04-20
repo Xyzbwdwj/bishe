@@ -91,10 +91,16 @@ def main():
             n,
             hidden_n,
             n,
+            lif_alpha=float(checkpoint.get("lif_alpha", 0.9)),
             lif_beta=float(checkpoint.get("lif_beta", args.lif_beta)),
             lif_threshold=float(checkpoint.get("lif_threshold", args.lif_threshold)),
             lif_reset=float(checkpoint.get("lif_reset", args.lif_reset)),
             sg_beta=float(checkpoint.get("sg_beta", args.sg_beta)),
+            lif_refractory=int(checkpoint.get("lif_refractory", 0)),
+            input_spike_mode=str(checkpoint.get("input_spike_mode", "analog")),
+            input_spike_scale=float(checkpoint.get("input_spike_scale", 5.0)),
+            learnable_threshold=bool(int(checkpoint.get("lif_learn_threshold", 0))),
+            readout_mode=str(checkpoint.get("snn_readout", "softmax_seq")),
         )
     else:
         model = ElmanRNN_pred(n, hidden_n, n)

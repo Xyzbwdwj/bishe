@@ -151,114 +151,389 @@ class SurrogateSpike(torch.autograd.Function):
 
 
 class _BaseElmanSNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        lif_alpha=0.9,
+        lif_beta=0.9,
+        lif_threshold=1.0,
+        lif_reset=1.0,
+        sg_beta=10.0,
+        input_spike_mode="poisson",
+        input_spike_scale=5.0,
+        lif_refractory=1,
+        learnable_threshold=True,
+        readout_mode="softmax_seq",
+    ):
         super(_BaseElmanSNN, self).__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
-        self.input_linear = nn.Linear(self.input_dim, self.hidden_dim)
+        self.input_spike_mode = str(input_spike_mode).lower()
+        self.input_spike_scale = float(input_spike_scale)
+        self.encoded_input_dim = self.input_dim * 2 if self.input_spike_mode == "onoff" else self.input_dim
+        self.input_linear = nn.Linear(self.encoded_input_dim, self.hidden_dim)
         self.hidden_linear = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.linear3 = nn.Linear(self.hidden_dim, self.output_dim)
         self.act = nn.Softmax(2)
+        self.readout_mode = str(readout_mode).lower()
+        if self.readout_mode not in ("softmax_seq", "logits_seq"):
+            raise ValueError("Unsupported readout_mode: {}".format(self.readout_mode))
+        self.register_buffer("lif_alpha", torch.tensor(float(lif_alpha), dtype=torch.float32), persistent=False)
         self.register_buffer("lif_beta", torch.tensor(float(lif_beta), dtype=torch.float32))
-        self.register_buffer("lif_threshold", torch.tensor(float(lif_threshold), dtype=torch.float32))
         self.register_buffer("lif_reset", torch.tensor(float(lif_reset), dtype=torch.float32))
         self.register_buffer("sg_beta", torch.tensor(float(sg_beta), dtype=torch.float32))
+        self.lif_threshold = nn.Parameter(
+            torch.tensor(float(lif_threshold), dtype=torch.float32),
+            requires_grad=bool(learnable_threshold),
+        )
+        self.lif_refractory = int(max(0, lif_refractory))
+        self.last_spike_seq = None
+        self.last_membrane_seq = None
+        self.last_input_spike_seq = None
+        self.last_synapse_seq = None
+        self._runtime_prev_spike = None
+        self._runtime_ref_count = None
+        self._runtime_syn = None
 
     def _spike_fn(self, x):
         return SurrogateSpike.apply(x, self.sg_beta)
 
-    def _lif_update(self, mem, current):
+    def _threshold(self):
+        # Keep threshold positive while preserving old checkpoint compatibility.
+        return torch.clamp(self.lif_threshold, min=1e-4)
+
+    def _encode_input(self, x_t):
+        if self.input_spike_mode in ("none", "analog", "rate"):
+            return x_t
+        if self.input_spike_mode in ("bernoulli", "poisson"):
+            if self.input_spike_mode == "bernoulli":
+                x_scaled = torch.tanh(x_t * self.input_spike_scale)
+                spike_prob = torch.clamp(torch.abs(x_scaled), 0.0, 1.0)
+            else:
+                spike_prob = torch.clamp(x_t, 0.0, 1.0)
+            return self._spike_fn(spike_prob - torch.rand_like(spike_prob))
+        if self.input_spike_mode == "onoff":
+            x_scaled = torch.tanh(x_t * self.input_spike_scale)
+            pos_prob = torch.clamp(torch.relu(x_scaled), 0.0, 1.0)
+            neg_prob = torch.clamp(torch.relu(-x_scaled), 0.0, 1.0)
+            pos_spike = self._spike_fn(pos_prob - torch.rand_like(pos_prob))
+            neg_spike = self._spike_fn(neg_prob - torch.rand_like(neg_prob))
+            return torch.cat([pos_spike, neg_spike], dim=-1)
+        if self.input_spike_mode == "signed_bernoulli":
+            x_scaled = torch.tanh(x_t * self.input_spike_scale)
+            spike_prob = torch.clamp(torch.abs(x_scaled), 0.0, 1.0)
+            input_spike_mag = self._spike_fn(spike_prob - torch.rand_like(spike_prob))
+            return input_spike_mag * torch.sign(x_scaled)
+        if self.input_spike_mode not in ("none", "analog", "rate", "bernoulli", "poisson", "onoff", "signed_bernoulli"):
+            raise ValueError("Unsupported input_spike_mode: {}".format(self.input_spike_mode))
+        return x_t
+
+    def _init_state(self, mem):
+        prev_spike = self._spike_fn(mem - self._threshold())
+        ref_count = torch.zeros_like(mem)
+        syn = torch.zeros_like(mem)
+        return prev_spike, ref_count, syn
+
+    def _lif_update(self, mem, syn, input_event, prev_spike, ref_count):
+        syn = self.lif_alpha * syn + self.input_linear(input_event) + self.hidden_linear(prev_spike)
+        current = syn
+        if self.lif_refractory > 0:
+            active_mask = (ref_count <= 0).to(mem.dtype)
+            current = current * active_mask
         mem = self.lif_beta * mem + current
-        spike = self._spike_fn(mem - self.lif_threshold)
+        spike = self._spike_fn(mem - self._threshold())
+        if self.lif_refractory > 0:
+            spike = spike * active_mask
         mem = mem - spike * self.lif_reset
-        return mem, spike
+        if self.lif_refractory > 0:
+            ref_count = torch.clamp(ref_count - 1.0, min=0.0)
+            new_ref = torch.full_like(ref_count, float(self.lif_refractory))
+            ref_count = torch.where(spike > 0, new_ref, ref_count)
+        return mem, syn, spike, ref_count
+
+    def _predict_from_state(self, mem, syn, spike, ref_count):
+        zeros = torch.zeros((mem.shape[0], self.encoded_input_dim), dtype=mem.dtype, device=mem.device)
+        return self._lif_update(mem, syn, zeros, spike, ref_count.clone())
 
     def lif_step(self, x_t, h_t):
         mem = h_t.squeeze(0)
-        cur = self.input_linear(x_t) + self.hidden_linear(mem)
-        mem, spike = self._lif_update(mem, cur)
+        if self._runtime_prev_spike is None or self._runtime_prev_spike.shape != mem.shape:
+            self._runtime_prev_spike, self._runtime_ref_count, self._runtime_syn = self._init_state(mem)
+        input_event = self._encode_input(x_t)
+        mem, syn, spike, ref_count = self._lif_update(
+            mem, self._runtime_syn, input_event, self._runtime_prev_spike, self._runtime_ref_count
+        )
+        self._runtime_prev_spike = spike
+        self._runtime_ref_count = ref_count
+        self._runtime_syn = syn
         return mem.unsqueeze(0), spike.unsqueeze(0)
 
     def lif_predict_step(self, h_t):
         mem = h_t.squeeze(0)
-        cur = self.hidden_linear(mem)
-        mem, spike = self._lif_update(mem, cur)
+        spike = self._spike_fn(mem - self._threshold())
+        ref_count = torch.zeros_like(mem)
+        syn = torch.zeros_like(mem)
+        mem, _, spike, _ = self._predict_from_state(mem, syn, spike, ref_count)
         return mem.unsqueeze(0), spike.unsqueeze(0)
 
 
 class ElmanSNN(_BaseElmanSNN):
-    # Output z_t from membrane potential m_t at each time step.
-    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+    # Event-driven SNN with spike-based recurrent communication and readout.
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        lif_beta=0.9,
+        lif_threshold=1.0,
+        lif_reset=1.0,
+        sg_beta=10.0,
+        input_spike_mode="poisson",
+        input_spike_scale=5.0,
+        lif_refractory=1,
+        learnable_threshold=True,
+        lif_alpha=0.9,
+        readout_mode="softmax_seq",
+    ):
         super(ElmanSNN, self).__init__(
-            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            output_dim=output_dim,
+            lif_alpha=lif_alpha,
+            lif_beta=lif_beta,
+            lif_threshold=lif_threshold,
+            lif_reset=lif_reset,
+            sg_beta=sg_beta,
+            input_spike_mode=input_spike_mode,
+            input_spike_scale=input_spike_scale,
+            lif_refractory=lif_refractory,
+            learnable_threshold=learnable_threshold,
+            readout_mode=readout_mode,
         )
 
     def forward(self, x, h0):
         batch_size, SeqN, _ = x.shape
-        ht = h0
-        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem = h0.squeeze(0)
+        spike_prev, ref_count, syn = self._init_state(mem)
+        spike_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        syn_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        input_spike_seq = torch.zeros((batch_size, SeqN, self.encoded_input_dim), device=x.device)
         for t in range(SeqN):
-            ht, _ = self.lif_step(x[:, t, :], ht)
-            z[:, t, :] = ht.squeeze(0)
-        out = self.act(self.linear3(z))
-        return out, ht
+            input_event = self._encode_input(x[:, t, :])
+            mem, syn, spike, ref_count = self._lif_update(mem, syn, input_event, spike_prev, ref_count)
+            spike_prev = spike
+            spike_seq[:, t, :] = spike
+            mem_seq[:, t, :] = mem
+            syn_seq[:, t, :] = syn
+            input_spike_seq[:, t, :] = input_event
+        self.last_spike_seq = spike_seq
+        self.last_membrane_seq = mem_seq
+        self.last_synapse_seq = syn_seq
+        self.last_input_spike_seq = input_spike_seq
+        self._runtime_prev_spike = None
+        self._runtime_ref_count = None
+        self._runtime_syn = None
+        logits_seq = self.linear3(spike_seq)
+        out = logits_seq if self.readout_mode == "logits_seq" else self.act(logits_seq)
+        return out, mem.unsqueeze(0)
 
 
 class ElmanSNN_v2(_BaseElmanSNN):
     # Return full membrane sequence as second output (for activity regularization).
-    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        lif_beta=0.9,
+        lif_threshold=1.0,
+        lif_reset=1.0,
+        sg_beta=10.0,
+        input_spike_mode="poisson",
+        input_spike_scale=5.0,
+        lif_refractory=1,
+        learnable_threshold=True,
+        lif_alpha=0.9,
+        readout_mode="softmax_seq",
+    ):
         super(ElmanSNN_v2, self).__init__(
-            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            output_dim=output_dim,
+            lif_alpha=lif_alpha,
+            lif_beta=lif_beta,
+            lif_threshold=lif_threshold,
+            lif_reset=lif_reset,
+            sg_beta=sg_beta,
+            input_spike_mode=input_spike_mode,
+            input_spike_scale=input_spike_scale,
+            lif_refractory=lif_refractory,
+            learnable_threshold=learnable_threshold,
+            readout_mode=readout_mode,
         )
 
     def forward(self, x, h0):
         batch_size, SeqN, _ = x.shape
-        ht = h0
-        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem = h0.squeeze(0)
+        spike_prev, ref_count, syn = self._init_state(mem)
+        spike_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        syn_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        input_spike_seq = torch.zeros((batch_size, SeqN, self.encoded_input_dim), device=x.device)
         for t in range(SeqN):
-            ht, _ = self.lif_step(x[:, t, :], ht)
-            z[:, t, :] = ht.squeeze(0)
-        out = self.act(self.linear3(z))
-        return out, z
+            input_event = self._encode_input(x[:, t, :])
+            mem, syn, spike, ref_count = self._lif_update(mem, syn, input_event, spike_prev, ref_count)
+            spike_prev = spike
+            spike_seq[:, t, :] = spike
+            mem_seq[:, t, :] = mem
+            syn_seq[:, t, :] = syn
+            input_spike_seq[:, t, :] = input_event
+        self.last_spike_seq = spike_seq
+        self.last_membrane_seq = mem_seq
+        self.last_synapse_seq = syn_seq
+        self.last_input_spike_seq = input_spike_seq
+        self._runtime_prev_spike = None
+        self._runtime_ref_count = None
+        self._runtime_syn = None
+        logits_seq = self.linear3(spike_seq)
+        out = logits_seq if self.readout_mode == "logits_seq" else self.act(logits_seq)
+        return out, mem_seq
 
 
 class ElmanSNN_pred(_BaseElmanSNN):
     # One-step-ahead prediction: y_{t+1|t} from predicted LIF state.
-    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        lif_beta=0.9,
+        lif_threshold=1.0,
+        lif_reset=1.0,
+        sg_beta=10.0,
+        input_spike_mode="poisson",
+        input_spike_scale=5.0,
+        lif_refractory=1,
+        learnable_threshold=True,
+        lif_alpha=0.9,
+        readout_mode="softmax_seq",
+    ):
         super(ElmanSNN_pred, self).__init__(
-            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            output_dim=output_dim,
+            lif_alpha=lif_alpha,
+            lif_beta=lif_beta,
+            lif_threshold=lif_threshold,
+            lif_reset=lif_reset,
+            sg_beta=sg_beta,
+            input_spike_mode=input_spike_mode,
+            input_spike_scale=input_spike_scale,
+            lif_refractory=lif_refractory,
+            learnable_threshold=learnable_threshold,
+            readout_mode=readout_mode,
         )
 
     def forward(self, x, h0):
         batch_size, SeqN, _ = x.shape
-        ht = h0
-        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem = h0.squeeze(0)
+        spike_prev, ref_count, syn = self._init_state(mem)
+        spike_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        actual_spike_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        syn_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        input_spike_seq = torch.zeros((batch_size, SeqN, self.encoded_input_dim), device=x.device)
         for t in range(SeqN - 1):
-            ht, _ = self.lif_step(x[:, t, :], ht)
-            htp1, _ = self.lif_predict_step(ht)
-            z[:, t + 1, :] = htp1.squeeze(0)
-        out = self.act(self.linear3(z))
-        return out, ht
+            input_event = self._encode_input(x[:, t, :])
+            mem, syn, spike, ref_count = self._lif_update(mem, syn, input_event, spike_prev, ref_count)
+            actual_spike_seq[:, t, :] = spike
+            mem_seq[:, t, :] = mem
+            syn_seq[:, t, :] = syn
+            input_spike_seq[:, t, :] = input_event
+            spike_prev = spike
+            _, _, pred_spike, _ = self._predict_from_state(mem, syn, spike, ref_count)
+            spike_seq[:, t + 1, :] = pred_spike
+        self.last_spike_seq = actual_spike_seq
+        self.last_membrane_seq = mem_seq
+        self.last_synapse_seq = syn_seq
+        self.last_input_spike_seq = input_spike_seq
+        self._runtime_prev_spike = None
+        self._runtime_ref_count = None
+        self._runtime_syn = None
+        logits_seq = self.linear3(spike_seq)
+        out = logits_seq if self.readout_mode == "logits_seq" else self.act(logits_seq)
+        return out, mem.unsqueeze(0)
 
 
 class ElmanSNN_pred_v2(_BaseElmanSNN):
     # One-step-ahead prediction with sequence state output.
-    def __init__(self, input_dim, hidden_dim, output_dim, lif_beta=0.9, lif_threshold=1.0, lif_reset=1.0, sg_beta=10.0):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        lif_beta=0.9,
+        lif_threshold=1.0,
+        lif_reset=1.0,
+        sg_beta=10.0,
+        input_spike_mode="poisson",
+        input_spike_scale=5.0,
+        lif_refractory=1,
+        learnable_threshold=True,
+        lif_alpha=0.9,
+        readout_mode="softmax_seq",
+    ):
         super(ElmanSNN_pred_v2, self).__init__(
-            input_dim, hidden_dim, output_dim, lif_beta, lif_threshold, lif_reset, sg_beta
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            output_dim=output_dim,
+            lif_alpha=lif_alpha,
+            lif_beta=lif_beta,
+            lif_threshold=lif_threshold,
+            lif_reset=lif_reset,
+            sg_beta=sg_beta,
+            input_spike_mode=input_spike_mode,
+            input_spike_scale=input_spike_scale,
+            lif_refractory=lif_refractory,
+            learnable_threshold=learnable_threshold,
+            readout_mode=readout_mode,
         )
 
     def forward(self, x, h0):
         batch_size, SeqN, _ = x.shape
-        ht = h0
-        z = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        mem = h0.squeeze(0)
+        spike_prev, ref_count, syn = self._init_state(mem)
+        spike_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        actual_spike_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        pred_mem_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        actual_mem_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        syn_seq = torch.zeros((batch_size, SeqN, self.hidden_dim), device=x.device)
+        input_spike_seq = torch.zeros((batch_size, SeqN, self.encoded_input_dim), device=x.device)
         for t in range(SeqN - 1):
-            ht, _ = self.lif_step(x[:, t, :], ht)
-            htp1, _ = self.lif_predict_step(ht)
-            z[:, t + 1, :] = htp1.squeeze(0)
-        out = self.act(self.linear3(z))
-        return out, z
+            input_event = self._encode_input(x[:, t, :])
+            mem, syn, spike, ref_count = self._lif_update(mem, syn, input_event, spike_prev, ref_count)
+            actual_spike_seq[:, t, :] = spike
+            actual_mem_seq[:, t, :] = mem
+            syn_seq[:, t, :] = syn
+            input_spike_seq[:, t, :] = input_event
+            spike_prev = spike
+            mem_pred, _, spike_pred, _ = self._predict_from_state(mem, syn, spike, ref_count)
+            pred_mem_seq[:, t + 1, :] = mem_pred
+            spike_seq[:, t + 1, :] = spike_pred
+        self.last_spike_seq = actual_spike_seq
+        self.last_membrane_seq = actual_mem_seq
+        self.last_synapse_seq = syn_seq
+        self.last_input_spike_seq = input_spike_seq
+        self._runtime_prev_spike = None
+        self._runtime_ref_count = None
+        self._runtime_syn = None
+        logits_seq = self.linear3(spike_seq)
+        out = logits_seq if self.readout_mode == "logits_seq" else self.act(logits_seq)
+        return out, pred_mem_seq
 
 
 class ElmanRNN_tp1(nn.Module):

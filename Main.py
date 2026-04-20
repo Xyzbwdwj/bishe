@@ -58,11 +58,22 @@ parser.add_argument('--predfd',default=0, type=int, help='one-step future pred l
 parser.add_argument('--pred_d',default=0,type=int,help='multiple-step ahead prediction')
 parser.add_argument('--snn', default=0, type=int, help='replace RNN hidden dynamics with LIF spiking dynamics')
 parser.add_argument('--auto-snn-tune', default=1, type=int, help='auto-apply stable defaults for SNN (Adam/lr/grad-clip)')
+parser.add_argument('--snn-standard', default=1, type=int, help='enable standard DL-SNN defaults (Poisson input + logits readout + CE)')
 parser.add_argument('--grad-clip', default=0.0, type=float, help='global grad-norm clipping value (0 disables)')
+parser.add_argument('--lif-alpha', default=0.9, type=float, help='synaptic current decay factor')
 parser.add_argument('--lif-beta', default=0.9, type=float, help='LIF leak factor')
 parser.add_argument('--lif-threshold', default=1.0, type=float, help='LIF spike threshold')
 parser.add_argument('--lif-reset', default=1.0, type=float, help='LIF reset amount after spike')
 parser.add_argument('--sg-beta', default=10.0, type=float, help='surrogate gradient slope for spike function')
+parser.add_argument('--lif-refractory', default=1, type=int, help='absolute refractory period (in steps)')
+parser.add_argument('--lif-learn-threshold', default=1, type=int, help='learnable threshold in SNN mode')
+parser.add_argument('--input-spike-mode', default='poisson', type=str, help='input encoding in SNN mode: poisson/onoff/analog')
+parser.add_argument('--input-spike-scale', default=5.0, type=float, help='input-to-spike scaling factor')
+parser.add_argument('--snn-readout', default='softmax_seq', type=str, help='SNN readout: softmax_seq/logits_seq')
+parser.add_argument('--snn-loss', default='mse', type=str, help='task loss in SNN mode: mse/ce')
+parser.add_argument('--snn-label-source', default='last', type=str, help='label extraction for CE: last/mean/max')
+parser.add_argument('--snn-rate-lambda', default=1e-4, type=float, help='spike-rate sparsity regularization weight')
+parser.add_argument('--snn-target-rate', default=0.05, type=float, help='target firing rate for spike regularization')
 parser.add_argument('--seed', default=-1, type=int, help='random seed for reproducibility (-1 disables)')
 # parser.add_argument('--ownnet',default=0, type = float, help='user defined RNN')
 # parser.add_argument('--momentum', default=0.01, type=float, metavar='M',
@@ -103,6 +114,15 @@ def main():
             args.grad_clip = 1.0
         if args.adam == 0:
             args.adam = 1
+        if args.snn_rate_lambda < 0:
+            args.snn_rate_lambda = 0.0
+    if args.snn and args.snn_standard:
+        if args.input_spike_mode == parser.get_default('input-spike-mode'):
+            args.input_spike_mode = 'poisson'
+        if args.snn_readout == parser.get_default('snn-readout'):
+            args.snn_readout = 'logits_seq'
+        if args.snn_loss == parser.get_default('snn-loss'):
+            args.snn_loss = 'ce'
     lr = args.lr
     n_epochs = args.epochs
     RecordEp = args.print_freq
@@ -130,8 +150,14 @@ def main():
 
     if args.auto_snn_tune and args.snn:
         print(
-            'Auto SNN tune enabled: optimizer={}, lr={}, grad_clip={}'.format(
-                'Adam' if args.adam else 'SGD', args.lr, args.grad_clip
+            'Auto SNN tune enabled: optimizer={}, lr={}, grad_clip={}, rate_lambda={}, standard={}, readout={}, loss={}'.format(
+                'Adam' if args.adam else 'SGD',
+                args.lr,
+                args.grad_clip,
+                args.snn_rate_lambda,
+                bool(args.snn_standard),
+                args.snn_readout,
+                args.snn_loss,
             ),
             file=f,
         )
@@ -209,20 +235,50 @@ def main():
     if args.snn:
         if args.predfd or args.pred_d:
             raise ValueError('SNN mode currently supports base/pred/pred+Hregularized, not --predfd or --pred_d.')
+        if args.snn_loss not in ('mse', 'ce'):
+            raise ValueError('Unsupported --snn-loss: {} (use mse/ce)'.format(args.snn_loss))
+        if args.snn_readout not in ('softmax_seq', 'logits_seq'):
+            raise ValueError('Unsupported --snn-readout: {} (use softmax_seq/logits_seq)'.format(args.snn_readout))
+        if args.snn_loss == 'ce' and args.snn_readout != 'logits_seq':
+            raise ValueError('--snn-loss ce requires --snn-readout logits_seq.')
+        if args.Hregularized and args.snn_loss == 'ce':
+            raise ValueError('--Hregularized with --snn-loss ce is not supported. Use --snn-loss mse.')
         print(
-            'Use SNN (LIF) dynamics: beta={:.3f}, threshold={:.3f}, reset={:.3f}, sg_beta={:.3f}'.format(
-                args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta
+            'Use SNN (event-driven) dynamics: alpha={:.3f}, beta={:.3f}, threshold={:.3f}, reset={:.3f}, refractory={}, sg_beta={:.3f}, input_mode={}, readout={}, loss={}, rate_lambda={:.2e}, learn_th={}'.format(
+                args.lif_alpha,
+                args.lif_beta,
+                args.lif_threshold,
+                args.lif_reset,
+                args.lif_refractory,
+                args.sg_beta,
+                args.input_spike_mode,
+                args.snn_readout,
+                args.snn_loss,
+                args.snn_rate_lambda,
+                bool(args.lif_learn_threshold),
             ),
             file=f,
         )
+        snn_kwargs = dict(
+            lif_alpha=args.lif_alpha,
+            lif_beta=args.lif_beta,
+            lif_threshold=args.lif_threshold,
+            lif_reset=args.lif_reset,
+            sg_beta=args.sg_beta,
+            input_spike_mode=args.input_spike_mode,
+            input_spike_scale=args.input_spike_scale,
+            lif_refractory=args.lif_refractory,
+            learnable_threshold=bool(args.lif_learn_threshold),
+            readout_mode=args.snn_readout,
+        )
         if args.pred and args.Hregularized:
-            net = ElmanSNN_pred_v2(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+            net = ElmanSNN_pred_v2(N, hidden_N, N, **snn_kwargs)
         elif args.pred:
-            net = ElmanSNN_pred(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+            net = ElmanSNN_pred(N, hidden_N, N, **snn_kwargs)
         elif args.Hregularized:
-            net = ElmanSNN_v2(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+            net = ElmanSNN_v2(N, hidden_N, N, **snn_kwargs)
         else:
-            net = ElmanSNN(N, hidden_N, N, args.lif_beta, args.lif_threshold, args.lif_reset, args.sg_beta)
+            net = ElmanSNN(N, hidden_N, N, **snn_kwargs)
     if args.relu and hasattr(net, 'rnn'):
         net.rnn = nn.RNN(N,hidden_N,1,batch_first=True,nonlinearity='relu')   
     if args.fixi:
@@ -390,10 +446,24 @@ def main():
         'loss': loss_list}
     if args.snn:
         save_dict['snn'] = 1
+        save_dict['snn_standard'] = int(args.snn_standard)
+        save_dict['lif_alpha'] = args.lif_alpha
         save_dict['lif_beta'] = args.lif_beta
-        save_dict['lif_threshold'] = args.lif_threshold
+        if hasattr(net, 'lif_threshold'):
+            save_dict['lif_threshold'] = float(torch.clamp(net.lif_threshold.detach(), min=1e-4).item())
+        else:
+            save_dict['lif_threshold'] = args.lif_threshold
         save_dict['lif_reset'] = args.lif_reset
         save_dict['sg_beta'] = args.sg_beta
+        save_dict['lif_refractory'] = args.lif_refractory
+        save_dict['lif_learn_threshold'] = int(args.lif_learn_threshold)
+        save_dict['input_spike_mode'] = args.input_spike_mode
+        save_dict['input_spike_scale'] = args.input_spike_scale
+        save_dict['snn_readout'] = args.snn_readout
+        save_dict['snn_loss'] = args.snn_loss
+        save_dict['snn_label_source'] = args.snn_label_source
+        save_dict['snn_rate_lambda'] = args.snn_rate_lambda
+        save_dict['snn_target_rate'] = args.snn_target_rate
     if args.partial:
         save_dict['Mask_W'] = Mask_W; save_dict['Mask_B'] = Mask_B
     torch.save(save_dict, args.savename+'.pth.tar')
@@ -443,6 +513,67 @@ def main():
 #             hidden[np.int(epoch/RecordEp),:,:] = hidden.cpu().detach().numpy()[0,:,:]
 #     return net, loss_list, y_hat, hidden
 
+def snn_rate_regularization(net, device):
+    if (not args.snn) or args.snn_rate_lambda <= 0:
+        return torch.zeros((), device=device)
+    spike_seq = getattr(net, 'last_spike_seq', None)
+    if spike_seq is None:
+        return torch.zeros((), device=device)
+    spike_rate = spike_seq.mean()
+    target_rate = torch.tensor(float(args.snn_target_rate), device=device, dtype=spike_rate.dtype)
+    return args.snn_rate_lambda * (spike_rate - target_rate).pow(2)
+
+
+def snn_last_rate(net):
+    spike_seq = getattr(net, 'last_spike_seq', None)
+    if spike_seq is None:
+        return None
+    return float(spike_seq.detach().mean().item())
+
+
+def apply_grad_mask(param, mask_np):
+    if param.grad is None:
+        return
+    mask_arr = np.asarray(mask_np)
+    if mask_arr.shape == ():
+        if bool(mask_arr):
+            param.grad.data.zero_()
+        return
+    mask_t = torch.from_numpy(mask_arr.astype(bool)).to(param.grad.device)
+    param.grad.data[mask_t] = 0
+
+
+def extract_ce_labels(target):
+    if args.snn_label_source == 'last':
+        label_source = target[:, -1, :]
+    elif args.snn_label_source == 'mean':
+        label_source = target.mean(dim=1)
+    elif args.snn_label_source == 'max':
+        label_source = target.max(dim=1).values
+    else:
+        raise ValueError('Unsupported --snn-label-source: {} (use last/mean/max)'.format(args.snn_label_source))
+    return torch.argmax(label_source, dim=-1).long()
+
+
+def compute_task_loss(output, target, criterion, ignore_first=False, pred_offset=0):
+    if args.snn and args.snn_loss == 'ce':
+        start_idx = max(int(pred_offset), 0)
+        if ignore_first:
+            start_idx = max(start_idx, 1)
+        if output.shape[1] <= start_idx:
+            logits = output.mean(dim=1)
+        else:
+            logits = output[:, start_idx:, :].mean(dim=1)
+        labels = extract_ce_labels(target)
+        return F.cross_entropy(logits, labels)
+
+    if pred_offset and pred_offset > 0:
+        return criterion(output[:, pred_offset:, :], target[:, pred_offset:, :])
+    if ignore_first:
+        return criterion(output[:, 1:, :], target[:, 1:, :])
+    return criterion(output, target)
+
+
 def train_partial(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer, RecordEp, Mask):
     '''
     With untrainable weight mask
@@ -480,17 +611,22 @@ def train_partial(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer, 
         else: 
             output, h_t = net(X_mini,h0)
         optimizer.zero_grad() # Clears existing gradients from previous epoch
-        if args.pred_d:
-            loss = criterion(output[:,args.pred_d:,:],Target_mini[:,args.pred_d:,:])
-        else:        
-            loss = criterion(output[:,1:,:],Target_mini[:,1:,:]) # ignore the first time step
+        loss_task = compute_task_loss(
+            output,
+            Target_mini,
+            criterion,
+            ignore_first=(args.pred_d == 0),
+            pred_offset=args.pred_d,
+        )
+        loss_sparse = snn_rate_regularization(net, X_mini.device)
+        loss = loss_task + loss_sparse
         if not torch.isfinite(loss):
             print('Non-finite loss at epoch {}. Stop training early.'.format(epoch), file=f)
             break
         loss.backward() # Does backpropagation and calculates gradients
         for l,p in enumerate(net.parameters()):
-            if p.requires_grad:
-                p.grad.data[torch.from_numpy(Mask[l].astype(bool))] = 0
+            if p.requires_grad and p.grad is not None:
+                apply_grad_mask(p, Mask[l])
         if args.grad_clip and args.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(net.parameters(), args.grad_clip)
         optimizer.step() # Updates the weights accordingly
@@ -506,6 +642,12 @@ def train_partial(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer, 
             end = time.time(); deltat= end - start; start = time.time()
             print('Epoch: {}/{}.............'.format(epoch,n_epochs), end=' ')
             print("Loss: {:.4f}".format(loss.item()))
+            if args.snn:
+                spike_rate = snn_last_rate(net)
+                if spike_rate is not None:
+                    print('Spike rate: {:.5f}, sparse loss: {:.5f}'.format(
+                        spike_rate, float(loss_sparse.detach().item())
+                    ))
             print('Time Elapsed since last display: {0:.1f} seconds'.format(deltat))
             print('Estimated remaining time: {0:.1f} minutes'.format(deltat*(n_epochs-epoch)/RecordEp/60))
             if args.pred:
@@ -568,11 +710,13 @@ def train_everyT(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer, R
             Target_t = Target_mini[:,:t+k,:]
             output, h_t = net(X_t,h0)
             optimizer.zero_grad() # Clears existing gradients from previous epoch        
-            loss = criterion(output,Target_t)
+            loss_task = compute_task_loss(output, Target_t, criterion, ignore_first=False, pred_offset=0)
+            loss_sparse = snn_rate_regularization(net, X_mini.device)
+            loss = loss_task + loss_sparse
             loss.backward() # Does backpropagation and calculates gradients
             for l,p in enumerate(net.parameters()):
-                if p.requires_grad:
-                    p.grad.data[Mask[l]] = 0
+                if p.requires_grad and p.grad is not None:
+                    apply_grad_mask(p, Mask[l])
             optimizer.step() # Updates the weights accordingly
             loss_list_pre = np.append(loss_list_pre,loss.item())
         loss_list = np.append(loss_list,np.mean(loss_list_pre))
@@ -586,6 +730,12 @@ def train_everyT(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer, R
             end = time.time(); deltat= end - start; start = time.time()
             print('Epoch: {}/{}.............'.format(epoch,n_epochs), end=' ')
             print("Loss: {:.4f}".format(loss.item()))
+            if args.snn:
+                spike_rate = snn_last_rate(net)
+                if spike_rate is not None:
+                    print('Spike rate: {:.5f}, sparse loss: {:.5f}'.format(
+                        spike_rate, float(loss_sparse.detach().item())
+                    ))
             print('Time Elapsed since last display: {0:.1f} seconds'.format(deltat))
             print('Estimated remaining time: {0:.1f} minutes'.format(deltat*(n_epochs-epoch)/RecordEp/60))
             if args.continuous:
@@ -634,16 +784,25 @@ def train_interleaved(X_mini, Target_mini, h0, n_epochs, net, criterion, optimiz
             else: 
                 output, h_t = net(X_mini[b:b+1,:,:],h0[:,b:b+1,:])
             optimizer.zero_grad() # Clears existing gradients from previous epoch        
-            loss = criterion(output,Target_mini[b:b+1,:,:])
+            loss_task = compute_task_loss(output, Target_mini[b:b+1,:,:], criterion, ignore_first=False, pred_offset=0)
+            loss_sparse = snn_rate_regularization(net, X_mini.device)
+            loss = loss_task + loss_sparse
             loss.backward() # Does backpropagation and calculates gradients
             for l,p in enumerate(net.parameters()):
-                p.grad.data[Mask[l]] = 0
+                if p.grad is not None:
+                    apply_grad_mask(p, Mask[l])
             optimizer.step() # Updates the weights accordingly
             loss_list = np.append(loss_list,loss.item())
             if epoch%RecordEp == 0:
                 end = time.time(); deltat= end - start; start = time.time()
                 print('Epoch: {}/{}.............'.format(epoch,n_epochs), end=' ')
                 print("Loss: {:.4f}".format(loss.item()))
+                if args.snn:
+                    spike_rate = snn_last_rate(net)
+                    if spike_rate is not None:
+                        print('Spike rate: {:.5f}, sparse loss: {:.5f}'.format(
+                            spike_rate, float(loss_sparse.detach().item())
+                        ))
                 print('Time Elapsed since last display: {0:.1f} seconds'.format(deltat))
                 print('Estimated remaining time: {0:.1f} minutes'.format(deltat*(n_epochs-epoch)/RecordEp/60))
                 if args.continuous:
@@ -688,16 +847,25 @@ def train_interval(X_mini, Target_mini, h0, n_epochs, net, criterion, optimizer,
                 else: 
                     output, h_t = net(X_mini[b:b+1,:,:],h0[:,b:b+1,:])
                 optimizer.zero_grad() # Clears existing gradients from previous epoch        
-                loss = criterion(output,Target_mini[b:b+1,:,:])
+                loss_task = compute_task_loss(output, Target_mini[b:b+1,:,:], criterion, ignore_first=False, pred_offset=0)
+                loss_sparse = snn_rate_regularization(net, X_mini.device)
+                loss = loss_task + loss_sparse
                 loss.backward() # Does backpropagation and calculates gradients
                 for l,p in enumerate(net.parameters()):
-                    if p.requires_grad: p.grad.data[Mask[l]] = 0
+                    if p.requires_grad and p.grad is not None:
+                        apply_grad_mask(p, Mask[l])
                 optimizer.step() # Updates the weights accordingly
                 loss_list = np.append(loss_list,loss.item())
             if epoch%RecordEp == 0:
                 end = time.time(); deltat= end - start; start = time.time()
                 print('Epoch: {}/{}.............'.format(epoch,n_epochs), end=' ')
                 print("Loss: {:.4f}".format(loss.item()))
+                if args.snn:
+                    spike_rate = snn_last_rate(net)
+                    if spike_rate is not None:
+                        print('Spike rate: {:.5f}, sparse loss: {:.5f}'.format(
+                            spike_rate, float(loss_sparse.detach().item())
+                        ))
                 print('Time Elapsed since last display: {0:.1f} seconds'.format(deltat))
                 print('Estimated remaining time: {0:.1f} minutes'.format(deltat*(n_epochs-epoch)/RecordEp/60))
                 if args.continuous:
@@ -735,11 +903,17 @@ def train_Hregularized(X_mini, Target_mini, h0, n_epochs, net, criterion, optimi
         else: 
             output, h_t = net(X_mini,h0)
         optimizer.zero_grad() # Clears existing gradients from previous epoch        
-        loss1 = criterion(output[:,1:,:],Target_mini[:,1:,:]);
+        loss1 = compute_task_loss(output, Target_mini, criterion, ignore_first=True, pred_offset=0)
         loss2 = lamda*criterion(h_t,torch.zeros(h_t.shape).to(X_mini.device))
+        loss_sparse = snn_rate_regularization(net, X_mini.device)
         loss1_list.append(loss1.item()); loss2_list.append(loss2.item())
-        loss = loss1+loss2; loss_list.append(loss.item())
+        loss = loss1 + loss2 + loss_sparse; loss_list.append(loss.item())
         loss.backward() # Does backpropagation and calculates gradients
+        for l,p in enumerate(net.parameters()):
+            if p.requires_grad and p.grad is not None:
+                apply_grad_mask(p, Mask[l])
+        if args.grad_clip and args.grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(net.parameters(), args.grad_clip)
         optimizer.step() # Updates the weights accordingly
         if epoch > 1000:
             diff = [loss_list[i+1]-loss_list[i] for i in range(len(loss_list)-1)]
@@ -747,13 +921,16 @@ def train_Hregularized(X_mini, Target_mini, h0, n_epochs, net, criterion, optimi
             init_loss = np.mean(np.array(loss_list[0]))
             if mean_diff < loss.item()*0.01 and loss.item() < init_loss*0.1: 
                 stop = 1
-        for l,p in enumerate(net.parameters()):
-            if p.requires_grad:
-                p.grad.data[Mask[l]] = 0
         if epoch%RecordEp == 0:
             end = time.time(); deltat= end - start; start = time.time()
             print('Epoch: {}/{}.............'.format(epoch,n_epochs), end=' ')
             print("Loss: {:.4f}".format(loss.item()))
+            if args.snn:
+                spike_rate = snn_last_rate(net)
+                if spike_rate is not None:
+                    print('Spike rate: {:.5f}, sparse loss: {:.5f}'.format(
+                        spike_rate, float(loss_sparse.detach().item())
+                    ))
             print('Time Elapsed since last display: {0:.1f} seconds'.format(deltat))
             print('Estimated remaining time: {0:.1f} minutes'.format(deltat*(n_epochs-epoch)/RecordEp/60))
             y_hat[:,np.int64(epoch/RecordEp),:,:] = output.cpu().detach().numpy()
@@ -849,10 +1026,21 @@ def evaluate_onestep(X_mini, Target_mini, h_t, net, criterion):
     '''
     Loop over entire sequence to record hidden activity
     '''
-    batch_size,SeqN,N = X_mini.shape       
+    batch_size,SeqN,N = X_mini.shape
     _,_,hidden_N = h_t.shape
+    if args.snn:
+        h_seed = h_t.detach()
+        output, _ = net(X_mini, h_seed)
+        output_seq = output.cpu().detach().numpy()
+        mem_seq = getattr(net, 'last_membrane_seq', None)
+        if mem_seq is None:
+            h_seq = np.zeros((batch_size, SeqN, hidden_N))
+        else:
+            h_seq = mem_seq.cpu().detach().numpy()
+        return output_seq, h_seq
+
     h_seq = np.zeros((batch_size,SeqN,hidden_N)); output_seq = np.zeros(X_mini.shape)
-    h_t = h_t.detach()                   
+    h_t = h_t.detach()
     for t in np.arange(X_mini.shape[1]):
         o_t,h_t = net(X_mini[:,t:t+1,:],h_t)
         output_seq[:,t:t+1,:] = o_t.cpu().detach().numpy()

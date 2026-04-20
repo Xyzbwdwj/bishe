@@ -74,10 +74,16 @@ def infer_model_and_run(ckpt, stop_t):
             n,
             hidden,
             n,
+            lif_alpha=float(ckpt.get("lif_alpha", 0.9)),
             lif_beta=float(ckpt.get("lif_beta", 0.9)),
             lif_threshold=float(ckpt.get("lif_threshold", 1.0)),
             lif_reset=float(ckpt.get("lif_reset", 1.0)),
             sg_beta=float(ckpt.get("sg_beta", 10.0)),
+            lif_refractory=int(ckpt.get("lif_refractory", 0)),
+            input_spike_mode=str(ckpt.get("input_spike_mode", "analog")),
+            input_spike_scale=float(ckpt.get("input_spike_scale", 5.0)),
+            learnable_threshold=bool(int(ckpt.get("lif_learn_threshold", 0))),
+            readout_mode=str(ckpt.get("snn_readout", "softmax_seq")),
         )
         model_type = "snn"
     else:

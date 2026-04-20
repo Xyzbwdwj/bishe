@@ -2,6 +2,7 @@
 .DS_Store
 .vscode/
 .idea/
+.codex
 
 # Python cache
 __pycache__/
@@ -19,15 +20,30 @@ __pycache__/
 .venv/
 venv/
 env/
+.tmp/
 
 # Local helper scripts
 activate_fig567.sh
 
 # Experiment outputs / checkpoints
 _smoke/
+_smoke_snn/
+_bench_cpu_*/
 Elman_SGD/
+official_snn/
 NeuralEvidence/allen_data/
+logs/
+
+# Downloaded datasets / transient data cache
+data/mnist_torchvision/
+
+# Generated compare artifacts
+mnist_compare/*_e*.pth.tar
+mnist_compare/*_e*.txt
+mnist_compare/*_e*.png
+mnist_compare/public/*_seed*_e*.pth.tar
+mnist_compare/public/*_seed*_e*.txt
+mnist_compare/public/*_seed*_e*.png
 
 # Optional logs / generated figures in root
 *.log
-

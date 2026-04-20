@@ -1,6 +1,22 @@
 Scripts used to reproduce figures in:
 https://www.biorxiv.org/content/10.1101/2022.05.19.492731v2
 
+## Repository Layout
+
+- `Main.py`, `Main_clean.py`, `Main_s4.py`, `Main_local.py`, `RNN_Class.py`, `helper.py`: core training and model code.
+- `Figure*.py`, `Figure3.m`: figure-specific plotting / experiment scripts.
+- `data/`: compact project inputs tracked in Git (custom `.pth.tar` and PCA file).
+- `Localization/`: trajectory generation and localization preprocessing.
+- `NeuralEvidence/`: Allen data access helpers and MATLAB analysis scripts for Fig.2.
+- `mnist_compare/public/`: MNIST public comparison scripts and report tables.
+- `docs/PROJECT_STRUCTURE.md`: concise directory map and version-control policy.
+
+## GitHub Submission Notes
+
+- Training outputs and checkpoints are intentionally excluded from version control (`Elman_SGD/`, `official_snn/`, `_bench_cpu_*`, `_smoke*`, `logs/`).
+- Downloaded MNIST raw files (`data/mnist_torchvision/`) are excluded; rerun `python Figure6_InputPrep.py` to regenerate.
+- `mnist_compare` generated run artifacts (`*.pth.tar`, run `*.txt`, run `*.png`) are excluded; keep scripts and summary tables for reproducibility.
+
 # NeuralEvidence (Fig.2)
 * DataAccess.py: specs to download data from Allen Brain Observatory; a full guide is available at https://allensdk.readthedocs.io/en/latest/_static/examples/nb/ecephys_data_access.html
 * Main_clean.m: plot Fig.2BCD.

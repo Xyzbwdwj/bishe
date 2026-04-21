@@ -1,0 +1,8 @@
+Settings:
+['Main.py', '--snn', '1', '--snn-standard', '1', '--adam', '1', '--gpu', '0', '--epochs', '50000', '--print-freq', '1000', '--n', '200', '--hidden-n', '200', '--total-steps', '2000', '--batch-size', '200', '--one-sample', '1', '--savename', 'official_snn/snn_full_std_50k']
+Auto SNN tune enabled: optimizer=Adam, lr=0.001, grad_clip=1.0, rate_lambda=0.0001, standard=True, readout=softmax_seq, loss=mse
+One travesal as one sample: SeqN=200
+Use SNN (event-driven) dynamics: alpha=0.900, beta=0.900, threshold=1.000, reset=1.000, refractory=1, sg_beta=10.000, input_mode=poisson, readout=softmax_seq, loss=mse, rate_lambda=1.00e-04, learn_th=True
+Cuda device availability: False
+Using ADAM optimizer
+Total training time: 69.0 minuetes

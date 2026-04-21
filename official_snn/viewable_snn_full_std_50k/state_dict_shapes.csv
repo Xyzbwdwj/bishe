@@ -1,0 +1,12 @@
+name,shape,numel
+lif_threshold,[],1
+lif_beta,[],1
+lif_reset,[],1
+sg_beta,[],1
+input_linear.weight,"[200, 200]",40000
+input_linear.bias,[200],200
+hidden_linear.weight,"[200, 200]",40000
+hidden_linear.bias,[200],200
+linear3.weight,"[200, 200]",40000
+linear3.bias,[200],200
+__TOTAL__,,120604

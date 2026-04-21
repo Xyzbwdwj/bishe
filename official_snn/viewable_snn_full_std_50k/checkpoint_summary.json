@@ -1,0 +1,23 @@
+{
+  "checkpoint": "official_snn/snn_full_std_50k.pth.tar",
+  "model_name": "ElmanSNN",
+  "snn": 1,
+  "snn_standard": 1,
+  "snn_loss": "mse",
+  "snn_readout": "softmax_seq",
+  "input_spike_mode": "poisson",
+  "lif_alpha": 0.9,
+  "lif_beta": 0.9,
+  "lif_threshold": 1.7636308670043945,
+  "lif_reset": 1.0,
+  "lif_refractory": 1,
+  "epochs": 50000,
+  "loss_first": 1.3148889541625977,
+  "loss_last": 0.04954591020941734,
+  "loss_min": 0.024582162499427795,
+  "eval_mse": 9.281451980314159e-07,
+  "eval_rmse": 0.000963402926106941,
+  "eval_r2": 0.9702153481098691,
+  "global_spike_rate": 0.09835000336170197,
+  "active_neuron_fraction_rate_gt_0.01": 0.43
+}

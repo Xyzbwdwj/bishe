@@ -1,0 +1,10 @@
+lif_threshold
+lif_beta
+lif_reset
+sg_beta
+input_linear.weight
+input_linear.bias
+hidden_linear.weight
+hidden_linear.bias
+linear3.weight
+linear3.bias

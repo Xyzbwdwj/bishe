@@ -1,8 +1,11 @@
 import argparse
 import csv
+import os
 import re
 import sys
 from pathlib import Path
+
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".cache", "matplotlib"))
 
 import matplotlib
 
@@ -16,26 +19,26 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from RNN_Class import ElmanRNN_pred, ElmanSNN_pred
+from core.RNN_Class import ElmanRNN_pred, ElmanSNN_pred
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate MNIST public-dataset compare runs (RNN vs SNN).")
     parser.add_argument(
         "--ckpt-dir",
-        default="mnist_compare/public",
+        default="mnist/compare/public",
         type=str,
         help="Directory containing *seed*_e*.pth.tar checkpoints.",
     )
     parser.add_argument(
         "--input-meta",
-        default="Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar",
+        default="mnist/data/processed/MNIST_68PC_SeqN100_Ns5.pth.tar",
         type=str,
         help="Figure6 input-meta file with PCA stats.",
     )
     parser.add_argument(
         "--out-dir",
-        default="mnist_compare/public/report",
+        default="mnist/compare/public/report",
         type=str,
         help="Output report directory.",
     )

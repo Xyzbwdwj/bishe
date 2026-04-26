@@ -5,6 +5,9 @@ import shutil
 import time
 import numpy as np
 from scipy.stats import norm
+
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".cache", "matplotlib"))
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -13,7 +16,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from RNN_Class import *
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.RNN_Class import *
 
 
 
@@ -32,6 +41,7 @@ parser.add_argument('--hidden-n', default=200, type=int, help='Hidden dimension 
 parser.add_argument('-t','--total-steps', default=2000, type=int, help='Total steps per traversal')
 parser.add_argument('--savename', default='net', type = str, help='Default output saving name')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
+parser.add_argument('--resume-plain', default=0, type=int, help='resume checkpoint without remapping/shuffling input and target')
 parser.add_argument('--ae', default=0, type=int, help='Autoencoder or not')
 parser.add_argument('--input_osci', default=0, type=int, help='Use oscilatory signal')
 parser.add_argument('--noisy', default=0, type=int, help='Gaussian noise sd (Percentage of input)')
@@ -339,13 +349,16 @@ def main():
             checkpoint = torch_load_compat(args.resume)
             net.load_state_dict(checkpoint['state_dict'])
             print("=> loaded previous network '{}' ".format(args.resume), file=f)
-            X = checkpoint['X_mini']; Target = checkpoint['Target_mini']
-            X_new = np.copy(X);Target_new = np.copy(Target)
-            idx = np.arange(np.int64(N)); np.random.seed(20); np.random.shuffle(idx)
-            X_mini = X[:,:,idx]
-            idx = np.arange(np.int64(N)); np.random.seed(30); np.random.shuffle(idx)
-            Target_mini = Target[:,:,idx]
-            print('Shuffle the original input and target', file = f)
+            if args.resume_plain:
+                print('Plain resume: keep current input and target unchanged', file=f)
+            else:
+                X = checkpoint['X_mini']; Target = checkpoint['Target_mini']
+                X_new = np.copy(X);Target_new = np.copy(Target)
+                idx = np.arange(np.int64(N)); np.random.seed(20); np.random.shuffle(idx)
+                X_mini = X[:,:,idx]
+                idx = np.arange(np.int64(N)); np.random.seed(30); np.random.shuffle(idx)
+                Target_mini = Target[:,:,idx]
+                print('Shuffle the original input and target', file = f)
         else:
             print("=> no checkpoint found at '{}'".format(args.resume), file=f)
 

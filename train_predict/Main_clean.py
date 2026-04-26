@@ -7,13 +7,22 @@ import shutil
 import time
 import numpy as np
 from scipy.stats import norm
+
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".cache", "matplotlib"))
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from RNN_Class import *
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.RNN_Class import *
 
 
 parser = argparse.ArgumentParser(description='PyTorch Elman BPTT Training')

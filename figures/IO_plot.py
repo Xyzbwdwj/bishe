@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from RNN_Class import ElmanRNN_pytorch_module
-from RNN_Class import ElmanRNN_pytorch_module_v2
+from core.RNN_Class import ElmanRNN_pytorch_module
+from core.RNN_Class import ElmanRNN_pytorch_module_v2
 import time
 import glob
 import os.path
@@ -222,6 +222,5 @@ def ITO_plot_formal(X_p,Target_p,output_p,N,SeqN,Path,savename,title_list,vmax_l
 
 if __name__ == '__main__':
     main(dic)
-
 
 

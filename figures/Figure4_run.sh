@@ -51,7 +51,7 @@ mkdir -p \
   "$BASE/F50per_stages"
 
 echo "[1/4] Train Panel B/C models on CPU"
-"$PY" Main_s4.py \
+"$PY" train_predict/Main_s4.py \
   --gpu "$GPU" \
   --epochs "$MAIN_S4_EPOCHS" \
   -p "$PRINT_FREQ" \
@@ -62,7 +62,7 @@ echo "[1/4] Train Panel B/C models on CPU"
   --fixi 1 \
   --savename "$OUT/Ns200_SeqN100_predloss_full"
 
-"$PY" Main_s4.py \
+"$PY" train_predict/Main_s4.py \
   --gpu "$GPU" \
   --epochs "$MAIN_S4_EPOCHS" \
   -p "$PRINT_FREQ" \
@@ -74,7 +74,7 @@ echo "[1/4] Train Panel B/C models on CPU"
   --savename "$OUT/Ns200_SeqN100_2Batch_predloss"
 
 echo "[2/4] Train base remap model"
-"$PY" Main_clean.py \
+"$PY" train_predict/Main_clean.py \
   --gpu "$GPU" \
   --epochs "$PRED_EPOCHS" \
   -p "$PRINT_FREQ" \
@@ -89,7 +89,7 @@ echo "[2/4] Train base remap model"
   --savename "$BASE/pred_relu"
 
 echo "[3/4] Train F->N remap stage"
-"$PY" Main_clean.py \
+"$PY" train_predict/Main_clean.py \
   --gpu "$GPU" \
   --epochs "$REMAP_N_EPOCHS" \
   -p "$PRINT_FREQ" \
@@ -106,7 +106,7 @@ echo "[3/4] Train F->N remap stage"
 
 echo "[4/4] Train F->F remap stages (5/10/20/30/40/50)"
 for noise in 5 10 20 30 40 50; do
-  "$PY" Main_clean.py \
+  "$PY" train_predict/Main_clean.py \
     --gpu "$GPU" \
     --epochs "$REMAP_F_EPOCHS" \
     -p "$PRINT_FREQ" \

@@ -35,7 +35,9 @@ NeuralEvidence/allen_data/
 logs/
 
 # Downloaded datasets / transient data cache
-data/mnist_torchvision/
+mnist/data/mnist_torchvision/
+mnist/data/processed/MNIST*.pth.tar
+mnist/data/processed/Rotated/MNIST*.npy
 
 # Generated compare artifacts
 mnist_compare/*_e*.pth.tar
@@ -44,6 +46,13 @@ mnist_compare/*_e*.png
 mnist_compare/public/*_seed*_e*.pth.tar
 mnist_compare/public/*_seed*_e*.txt
 mnist_compare/public/*_seed*_e*.png
+mnist/compare/*_e*.pth.tar
+mnist/compare/*_e*.txt
+mnist/compare/*_e*.png
+mnist/compare/public/*_seed*_e*.pth.tar
+mnist/compare/public/*_seed*_e*.txt
+mnist/compare/public/*_seed*_e*.png
+mnist/mnist_next_frame*/
 
 # Optional logs / generated figures in root
 *.log

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 PY="${PY:-python3}"
 if [[ -z "${GPU:-}" ]]; then
@@ -27,7 +27,7 @@ export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 mkdir -p "$OUT_DIR"
 echo "[info] GPU mode: $GPU (set GPU=0/1 manually to override)"
 
-# Keep Main.py's recorder dimensions valid for short smoke runs.
+# Keep train_predict/Main.py's recorder dimensions valid for short smoke runs.
 if (( TOTAL_EPOCHS < PF_SEQ )); then PF_SEQ="$TOTAL_EPOCHS"; fi
 if (( TOTAL_EPOCHS < PF_NS200 )); then PF_NS200="$TOTAL_EPOCHS"; fi
 if (( TOTAL_EPOCHS < PF_MARCUS )); then PF_MARCUS="$TOTAL_EPOCHS"; fi
@@ -67,7 +67,7 @@ run_case() {
   fi
 
   echo "[run] $name"
-  "$PY" Main.py \
+  "$PY" train_predict/Main.py \
     "${COMMON_ARGS[@]}" \
     --input "$input" \
     --savename "$save_path" \

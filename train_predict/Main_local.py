@@ -1,12 +1,21 @@
 import numpy as np
+import os
+
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".cache", "matplotlib"))
+
 from matplotlib import pyplot as plt
-from RNN_Class import *
-from helper import *
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.RNN_Class import *
+from core.helper import *
 import pickle
 
 import argparse
-import sys
-import os
 import shutil
 
 """

@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from RNN_Class import ElmanRNN, ElmanRNN_tp1
-from helper import Grid_PF, MI_Grid
+from core.RNN_Class import ElmanRNN, ElmanRNN_tp1
+from core.helper import Grid_PF, MI_Grid
 
 
 BIGGER_SIZE = 14

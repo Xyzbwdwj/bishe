@@ -3,6 +3,8 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".cache", "matplotlib"))
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -12,24 +14,24 @@ import torch
 import torch.nn as nn
 from sklearn.decomposition import FastICA
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from RNN_Class import ElmanRNN_pred, ElmanSNN_pred
+from core.RNN_Class import ElmanRNN_pred, ElmanSNN_pred
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Reproduce Fig.6 from trained model")
     parser.add_argument(
         "--model",
-        default="Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5_partial.pth.tar",
+        default="mnist/compare/public/rnn_pred_seed0_e3000.pth.tar",
         type=str,
         help="Trained predictive checkpoint from Main.py",
     )
     parser.add_argument(
         "--input-meta",
-        default="Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar",
+        default="mnist/data/processed/MNIST_68PC_SeqN100_Ns5.pth.tar",
         type=str,
         help="Output of Figure6_InputPrep.py containing PCA metadata",
     )

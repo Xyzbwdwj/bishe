@@ -3,6 +3,8 @@ import gzip
 import os
 import pickle
 
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(os.getcwd(), ".cache", "matplotlib"))
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -23,7 +25,7 @@ def parse_args():
     )
     parser.add_argument(
         "--mnist-gz",
-        default="data/train-images-idx3-ubyte.gz",
+        default="mnist/data/train-images-idx3-ubyte.gz",
         type=str,
         help="Raw MNIST gzip file used for PCA reconstruction panel",
     )

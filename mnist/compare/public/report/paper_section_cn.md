@@ -36,9 +36,8 @@
 3. 本实验支持“具备生物启发记忆机制的脉冲网络可以提升序列预测性能”的结论。
 
 ## 4.X.5 复现与产物
-- 一键脚本：`mnist_compare/public/run_public_mnist_compare.sh`
-- 评估脚本：`mnist_compare/public/evaluate_public_mnist_compare.py`
-- 逐次指标：`mnist_compare/public/report/per_run_metrics.csv`
-- 汇总指标：`mnist_compare/public/report/summary_by_model.csv`
-- 可视化：`mnist_compare/public/report/compare_barplots.png`
-
+- 一键脚本：`mnist/scripts/run_public_mnist_compare.sh`
+- 评估脚本：`mnist/scripts/evaluate_public_mnist_compare.py`
+- 逐次指标：`mnist/compare/public/report/per_run_metrics.csv`
+- 汇总指标：`mnist/compare/public/report/summary_by_model.csv`
+- 可视化：`mnist/compare/public/report/compare_barplots.png`

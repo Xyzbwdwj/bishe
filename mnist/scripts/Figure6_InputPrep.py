@@ -11,25 +11,25 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Prepare MNIST PCA sequence input for Fig.6")
     parser.add_argument(
         "--images",
-        default="Elman_SGD/predloss/Rotated/MNIST_X_train.npy",
+        default="mnist/data/processed/Rotated/MNIST_X_train.npy",
         type=str,
         help="Path to flattened MNIST image array (num_samples x 784)",
     )
     parser.add_argument(
         "--labels",
-        default="Elman_SGD/predloss/Rotated/MNIST_labels.npy",
+        default="mnist/data/processed/Rotated/MNIST_labels.npy",
         type=str,
         help="Path to labels array (num_samples,)",
     )
     parser.add_argument(
         "--mnist-images-gz",
-        default="data/train-images-idx3-ubyte.gz",
+        default="mnist/data/train-images-idx3-ubyte.gz",
         type=str,
         help="Fallback raw MNIST images gzip if --images is missing",
     )
     parser.add_argument(
         "--mnist-labels-gz",
-        default="data/train-labels-idx1-ubyte.gz",
+        default="mnist/data/train-labels-idx1-ubyte.gz",
         type=str,
         help="Fallback raw MNIST labels gzip if --labels is missing",
     )
@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument("--ns", default=5, type=int, help="Number of sequences")
     parser.add_argument(
         "--out",
-        default="Elman_SGD/predloss/MNIST_68PC_SeqN100_Ns5.pth.tar",
+        default="mnist/data/processed/MNIST_68PC_SeqN100_Ns5.pth.tar",
         type=str,
         help="Output .pth.tar path",
     )
